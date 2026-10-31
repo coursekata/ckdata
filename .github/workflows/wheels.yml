@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-22.04, target: x86_64, manylinux: auto, test: true }
-          - { os: ubuntu-22.04, target: aarch64, manylinux: auto, test: false }
+          - { os: ubuntu-24.04-arm, target: aarch64, manylinux: auto, test: true }
           - { os: windows-latest, target: x64, test: true }
           - { os: macos-15-intel, target: x86_64, test: true }
           - { os: macos-latest, target: aarch64, test: true }
