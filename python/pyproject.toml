@@ -1,0 +1,8 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ckspike"
+version = "0.0.0"
+requires-python = ">=3.11"

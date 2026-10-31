@@ -1,0 +1,14 @@
+[package]
+name = "ckspike-py"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "ckspike"
+crate-type = ["cdylib"]
+
+[dependencies]
+ckcore = { path = "../core" }
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
+pyo3-arrow = "0.20"

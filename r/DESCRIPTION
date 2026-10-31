@@ -1,0 +1,14 @@
+Package: ckspike
+Title: Delivery Spike for a Shared ckdata Core
+Version: 0.0.0.9000
+Authors@R: person("Adam", "Blake", , "adam@ablake.dev", role = c("aut", "cre"))
+Description: Throwaway test that a Rust core with the AWS SDK and Arrow
+ builds and installs as an R binary.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Config/rextendr/version: 0.5.0
+SystemRequirements: Cargo (Rust's package manager), rustc >= 1.94.1, xz
+Depends: R (>= 4.2)
+Imports: bit64, nanoarrow, tibble
