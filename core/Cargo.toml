@@ -6,8 +6,8 @@ publish = false
 
 [dependencies]
 aws-config = { version = "1", features = ["behavior-version-latest"] }
-aws-sdk-athena = "1"
-aws-sdk-s3 = "1"
+aws-sdk-athena = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 arrow-array = { version = "59", features = ["ffi"] }
 arrow-schema = "59"
 parquet = { version = "59", default-features = false, features = ["arrow", "snap"] }
