@@ -1,10 +1,10 @@
 #' The core's literal probe as a tibble, through a nanoarrow stream.
 #'
 #' 64-bit integer columns come back as `bit64::integer64` so values past 2^53 stay exact.
-#' @export
-ck_probe <- function() {
+#' @noRd
+arrow_probe <- function() {
   stream <- nanoarrow::nanoarrow_allocate_array_stream()
-  ck_probe_into(nanoarrow::nanoarrow_pointer_addr_chr(stream))
+  arrow_probe_into(nanoarrow::nanoarrow_pointer_addr_chr(stream))
   schema <- stream$get_schema()
   ptype <- nanoarrow::infer_nanoarrow_ptype(schema)
   is_int64 <- vapply(schema$children, function(field) field$format == "l", logical(1))

@@ -1,20 +1,27 @@
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_arrow::PyRecordBatchReader;
 
+/// The core's version, then the version of each AWS SDK crate it links.
 #[pyfunction]
-fn versions() -> Vec<String> {
-    ckcore::versions()
+#[pyo3(name = "_core_versions")]
+fn core_versions() -> Vec<String> {
+    ckdata::versions()
 }
 
-/// The literal probe as an Arrow stream that Polars, pyarrow, pandas and DuckDB each accept.
+/// The core's literal probe as an Arrow stream that Polars, pyarrow, pandas and DuckDB each accept.
 #[pyfunction]
-fn probe() -> PyRecordBatchReader {
-    PyRecordBatchReader::new(ckcore::probe_reader())
+#[pyo3(name = "_arrow_probe")]
+fn arrow_probe() -> PyResult<PyRecordBatchReader> {
+    let reader = ckdata::arrow_probe().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    Ok(PyRecordBatchReader::new(reader))
 }
 
 #[pymodule]
-fn ckspike(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(versions, m)?)?;
-    m.add_function(wrap_pyfunction!(probe, m)?)?;
+#[pyo3(name = "ckdata")]
+fn ckdata_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add_function(wrap_pyfunction!(core_versions, m)?)?;
+    m.add_function(wrap_pyfunction!(arrow_probe, m)?)?;
     Ok(())
 }

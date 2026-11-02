@@ -1,13 +1,13 @@
 [package]
-name = 'ckspike'
+name = 'ckdata-r'
 publish = false
 version = '0.1.0'
-edition = '2021'
+edition = '2024'
 rust-version = '1.94'
 
 [lib]
 crate-type = [ 'rlib', 'staticlib' ]
-name = 'ckspike'
+name = 'ckdata_r'
 
 [[bin]]
 name = 'document'
@@ -16,7 +16,8 @@ path = 'document.rs'
 [dependencies]
 extendr-api = '0.9.0'
 arrow-array = { version = '59', features = ['ffi'] }
-ckcore = { git = 'https://github.com/coursekata/ckdata', branch = 'main' }
+# A symlink to the repository's core/, which R CMD build copies into the source tarball.
+ckdata = { path = 'core' }
 
 [profile.release]
 lto = true

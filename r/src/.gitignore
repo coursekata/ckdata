@@ -6,4 +6,3 @@ target
 rust/vendor
 Makevars
 Makevars.win
-Cargo.lock

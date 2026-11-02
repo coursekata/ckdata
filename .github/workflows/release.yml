@@ -1,0 +1,61 @@
+name: release
+
+# A v* tag on main releases the R package. The tag must name the version all three manifests carry,
+# and the GitHub release created here is what R-universe builds from, through "branch": "*release"
+# in the registry; verify then installs what R-universe built. Wheels and PyPI arrive with the
+# Python package.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # for the ancestry check against main
+          persist-credentials: false
+
+      - name: Check the tag names the manifests' version and sits on main
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          core=$(sed -n 's/^version = "\(.*\)"$/\1/p' core/Cargo.toml | head -n 1)
+          py=$(sed -n 's/^version = "\(.*\)"$/\1/p' python/Cargo.toml | head -n 1)
+          r=$(sed -n 's/^Version: //p' r/DESCRIPTION)
+          echo "tag $want, core $core, Python $py, R $r"
+          if [ "$core" != "$want" ] || [ "$py" != "$want" ] || [ "$r" != "$want" ]; then
+            echo "::error::$GITHUB_REF_NAME does not match the manifests' versions"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main"
+            exit 1
+          fi
+
+  github-release:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub release R-universe builds from
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+
+  # A release created with the workflow's own token starts no other workflow, so the install check
+  # is called here rather than triggered by the release.
+  verify:
+    needs: github-release
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      version: ${{ github.ref_name }}

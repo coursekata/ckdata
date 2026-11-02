@@ -1,0 +1,13 @@
+# Action SHAs only; Renovate keeps every other dependency.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # The org's seven-day soak, which Renovate applies to everything else.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

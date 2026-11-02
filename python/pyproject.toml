@@ -3,6 +3,24 @@ requires = ["maturin>=1.15,<2"]
 build-backend = "maturin"
 
 [project]
-name = "ckspike"
-version = "0.0.0"
+name = "ckdata"
+dynamic = ["version"]
+description = "Query the CourseKata data lake. A pre-release that runs no query yet."
 requires-python = ">=3.11"
+license = "MIT"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+]
+
+[project.urls]
+Repository = "https://github.com/coursekata/ckdata"
+Issues = "https://github.com/coursekata/ckdata/issues"
+
+[tool.maturin]
+# The crate is ckdata-py, since the core holds the name ckdata; Python imports ckdata.
+module-name = "ckdata"
+
+[dependency-groups]
+test = ["pytest", "polars", "pyarrow", "pandas", "duckdb"]

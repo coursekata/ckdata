@@ -1,11 +1,10 @@
 [package]
-name = "ckcore"
-version = "0.0.0"
-edition = "2021"
+name = "ckdata"
+version = "0.0.1"
+edition = "2024"
 publish = false
 
 [dependencies]
-aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-athena = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 arrow-array = { version = "59", features = ["ffi"] }

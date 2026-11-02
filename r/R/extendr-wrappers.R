@@ -2,15 +2,15 @@
 # nolint start
 
 #' @usage NULL
-#' @useDynLib ckspike, .registration = TRUE
+#' @useDynLib ckdata, .registration = TRUE
 NULL
 
-#' The SDK clients the core links, configured offline.
-#' @export
-ck_versions <- function() .Call(wrap__ck_versions)
+#' The core's version, then the version of each AWS SDK crate it links.
+#' @noRd
+core_versions <- function() .Call(wrap__core_versions)
 
 #' Fill an empty nanoarrow stream, given its address, with the core's literal probe.
-#' @export
-ck_probe_into <- function(address) .Call(wrap__ck_probe_into, address)
+#' @noRd
+arrow_probe_into <- function(address) .Call(wrap__arrow_probe_into, address)
 
 # nolint end

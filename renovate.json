@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Runs as the hosted Renovate App, since nothing in this repository's CI holds cloud credentials. Dependabot keeps the action SHAs.",
+  "extends": ["github>coursekata/ck-ci//renovate/default.json"],
+  "enabledManagers": ["cargo", "pep621", "pre-commit"],
+  "packageRules": [
+    {
+      "description": "pyo3-arrow is built on one Arrow major, and two Arrow majors in one build fail to compile, so Arrow, Parquet and pyo3-arrow move together.",
+      "matchPackageNames": ["arrow-*", "parquet", "pyo3-arrow"],
+      "groupName": "Arrow"
+    }
+  ]
+}
