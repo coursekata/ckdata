@@ -54,7 +54,8 @@ jobs:
         id: toolchain
         run: |
           rustup toolchain install stable --profile minimal --component clippy
-          echo "key=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          toolchain_key=$({ rustc -vV; printf '%s\n' "${ImageOS:-}" "${ImageVersion:-}"; } | sha256sum | cut -d ' ' -f 1)
+          echo "key=$toolchain_key" >> "$GITHUB_OUTPUT"
 
       - name: Cache Cargo downloads and workspace builds
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -63,7 +64,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml') }}
+          key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml') }}
 
       # Lints the Python binding too.
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
