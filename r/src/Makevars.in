@@ -1,3 +1,4 @@
+@MACOS_TARGET@
 TARGET_DIR = ./rust/target
 LIBDIR = $(TARGET_DIR)/@LIBDIR@
 STATLIB = $(LIBDIR)/libckspike.a

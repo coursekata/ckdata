@@ -70,6 +70,22 @@ cfg <- if (is_debug) "debug" else "release"
   ""
 )
 
+# On macOS, build every object for the oldest macOS this R supports, unless the builder chose a
+# target (R-universe does). Otherwise rustc, the C compiler and the linker each pick their own,
+# and the linker's warnings about newer objects fail R CMD check.
+.macos_target <- ""
+if (Sys.info()[["sysname"]] == "Darwin" && !nzchar(Sys.getenv("MACOSX_DEPLOYMENT_TARGET"))) {
+  load_commands <- tryCatch(
+    system2("otool", c("-l", shQuote(file.path(R.home("lib"), "libR.dylib"))), stdout = TRUE, stderr = FALSE),
+    error = function(e) character()
+  )
+  minos <- grep("^[[:space:]]*minos[[:space:]]", load_commands, value = TRUE)
+  if (length(minos) > 0) {
+    .macos_target <- paste("export MACOSX_DEPLOYMENT_TARGET =", sub("^[[:space:]]*minos[[:space:]]+", "", minos[1]))
+    message("Targeting macOS ", sub("^export MACOSX_DEPLOYMENT_TARGET = ", "", .macos_target), ", R's own minimum.")
+  }
+}
+
 # read in the Makevars.in file checking
 is_windows <- .Platform[["OS.type"]] == "windows"
 
@@ -102,7 +118,8 @@ new_txt <- gsub("@CRAN_FLAGS@", .cran_flags, mv_txt) |>
   gsub("@CLEAN_TARGET@", .clean_targets, x = _) |>
   gsub("@LIBDIR@", .libdir, x = _) |>
   gsub("@TARGET@", .target, x = _) |>
-  gsub("@PANIC_EXPORTS@", .panic_exports, x = _)
+  gsub("@PANIC_EXPORTS@", .panic_exports, x = _) |>
+  gsub("@MACOS_TARGET@", .macos_target, x = _)
 
 message("Writing `", mv_ofp, "`.")
 con <- file(mv_ofp, open = "wb")
