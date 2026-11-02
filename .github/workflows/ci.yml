@@ -24,6 +24,7 @@ jobs:
     uses: coursekata/ck-ci/.github/workflows/quality.yml@v0.2.1
 
   hooks:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,6 +43,7 @@ jobs:
           extra-args: --all-files
 
   rust:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,7 +51,19 @@ jobs:
           persist-credentials: false
 
       - name: Install clippy
-        run: rustup toolchain install stable --profile minimal --component clippy
+        id: toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          echo "key=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo downloads and workspace builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml') }}
 
       # Lints the Python binding too.
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -58,6 +72,7 @@ jobs:
       - run: cargo test --workspace --locked --exclude ckdata-py
 
   r-source:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,6 +82,12 @@ jobs:
       - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
         with:
           use-public-rspm: true
+
+      - name: Install Rust for the cache smoke test
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Check R's Cargo cache and cleanup
+        run: python3 scripts/check-r-cargo-cache.py
 
       - name: Build the source tarball
         run: R CMD build r
@@ -83,10 +104,12 @@ jobs:
 
   r:
     name: r (${{ matrix.os }}, R ${{ matrix.r }})
-    needs: r-source
+    # Fail the inexpensive checks before starting four native R builds.
+    needs: [quality, hooks, rust, r-source]
+    timeout-minutes: 45
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - { os: ubuntu-latest, r: release }
@@ -121,6 +144,29 @@ jobs:
           rustup toolchain install stable --profile minimal
           if [ "$RUNNER_OS" = Windows ]; then rustup target add x86_64-pc-windows-gnu; fi
 
+      - name: Configure persistent Cargo paths and cache identity
+        id: cargo
+        shell: Rscript {0}
+        run: |
+          cache <- file.path(Sys.getenv("RUNNER_TEMP"), "ckdata-cargo")
+          dir.create(cache, recursive = TRUE, showWarnings = FALSE)
+          cache <- normalizePath(cache, winslash = "/", mustWork = TRUE)
+          paths <- c(CARGO_HOME = file.path(cache, "home"), CARGO_TARGET_DIR = file.path(cache, "target"))
+          cat(paste(names(paths), paths, sep = "="), file = Sys.getenv("GITHUB_ENV"), sep = "\n", append = TRUE)
+          identity <- tempfile()
+          writeLines(c(system2("rustc", "-vV", stdout = TRUE), R.version.string, R.version$platform,
+            Sys.getenv(c("ImageOS", "ImageVersion", "MACOSX_DEPLOYMENT_TARGET", "RUSTFLAGS"))), identity)
+          cat(paste0("key=", unname(tools::md5sum(identity))), file = Sys.getenv("GITHUB_OUTPUT"), sep = "\n", append = TRUE)
+
+      - name: Cache R's Cargo downloads and builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/ckdata-cargo/home/registry
+            ${{ runner.temp }}/ckdata-cargo/home/git
+            ${{ runner.temp }}/ckdata-cargo/target
+          key: cargo-r-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cargo.outputs.key }}-${{ hashFiles('r/src/rust/Cargo.lock', 'r/src/rust/Cargo.toml', 'core/Cargo.toml', 'r/src/Makevars*.in', 'r/tools/config.R') }}
+
       - name: Check the source tarball
         shell: Rscript {0}
         run: |
@@ -132,6 +178,7 @@ jobs:
   ci-passed:
     if: always()
     needs: [quality, hooks, rust, r-source, r]
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - name: Assert every job succeeded

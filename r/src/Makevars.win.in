@@ -1,6 +1,6 @@
 TARGET = $(subst 64,x86_64,$(subst 32,i686,$(WIN)))-pc-windows-gnu
 
-TARGET_DIR = ./rust/target
+TARGET_DIR = $(or $(CARGO_TARGET_DIR),./rust/target)
 LIBDIR = $(TARGET_DIR)/$(TARGET)/@LIBDIR@
 STATLIB = $(LIBDIR)/libckdata_r.a
 PKG_LIBS = -L$(LIBDIR) -lckdata_r -lws2_32 -ladvapi32 -luserenv -lbcrypt -lntdll
@@ -12,6 +12,7 @@ all: $(SHLIB) rust_clean
 $(SHLIB): $(STATLIB)
 
 CARGOTMP = $(CURDIR)/.cargo
+CARGO_HOME ?= $(CARGOTMP)
 VENDOR_DIR = vendor
 
 $(STATLIB):
@@ -32,12 +33,12 @@ $(STATLIB):
 	fi
 
 	# Build the project using Cargo with additional flags
-	export CARGO_HOME=$(CARGOTMP) && \
-	export LIBRARY_PATH="$(LIBRARY_PATH);$(CURDIR)/$(TARGET_DIR)/libgcc_mock" && \
+	export CARGO_HOME="$(CARGO_HOME)" && \
+	export LIBRARY_PATH="$(LIBRARY_PATH);$(abspath $(TARGET_DIR))/libgcc_mock" && \
 	RUSTFLAGS="$(RUSTFLAGS) --print=native-static-libs" cargo build --locked @CRAN_FLAGS@ --target=$(TARGET) --lib @PROFILE@ --manifest-path=rust/Cargo.toml --target-dir=$(TARGET_DIR)
 
 	# Generate wrappers
-	export CARGO_HOME=$(CARGOTMP) && \
+	export CARGO_HOME="$(CARGO_HOME)" && \
 	export PATH="$(PATH):$(HOME)/.cargo/bin" && \
 	cargo run --locked @CRAN_FLAGS@ --bin document --target $(TARGET) --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR)
 
@@ -48,4 +49,4 @@ rust_clean: $(SHLIB)
 	rm -Rf $(CARGOTMP) $(VENDOR_DIR) @CLEAN_TARGET@
 
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) $(TARGET_DIR) $(VENDOR_DIR)
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) $(if $(CARGO_TARGET_DIR),,$(TARGET_DIR)) $(VENDOR_DIR)
