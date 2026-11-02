@@ -1,0 +1,64 @@
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+
+  # Stops a secret from ever entering the history; CI re-checks the full commit graph, because
+  # this hook only sees the staged diff and yields to --no-verify.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      # -system resolves gitleaks from PATH; upstream omits pass_filenames on this variant only, so
+      # the staged paths would otherwise be appended and the first one read as gitleaks' target.
+      - id: gitleaks-system
+        pass_filenames: false
+
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 44.199.0
+    hooks:
+      - id: renovate-config-validator
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # The R crate is a workspace of its own, so it is formatted on its own.
+      - id: rustfmt
+        name: rustfmt
+        entry: sh -c 'cargo fmt --all --check && cargo fmt --all --check --manifest-path r/src/rust/Cargo.toml'
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: clippy
+        name: clippy
+        entry: cargo clippy --workspace --all-targets --locked -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --workspace --locked --exclude ckdata-py
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
