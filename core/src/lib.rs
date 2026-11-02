@@ -14,6 +14,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 /// The core's version, then the version of each AWS SDK crate it links.
 pub fn versions() -> Vec<String> {
+    let ci_negative_control = ();
     vec![
         format!("ckdata {}", env!("CARGO_PKG_VERSION")),
         format!("aws-sdk-athena {}", aws_sdk_athena::meta::PKG_VERSION),
