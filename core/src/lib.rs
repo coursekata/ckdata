@@ -1,6 +1,16 @@
-//! ckdata's shared core. For now it links the AWS SDK and Arrow crates the query path will use and
-//! returns a literal table through Parquet and Arrow, which both packages' tests check. It makes no AWS call, holds no
-//! credentials and configures no client.
+//! Shared connection and Arrow infrastructure for ckdata's R and Python bindings.
+//! `Connection::connect` explicitly resolves AWS credentials and may assume a role.
+//! The literal Arrow probe remains entirely offline.
+mod connection;
+mod error;
+mod metadata;
+mod settings;
+
+pub use connection::{Connection, SessionStatus};
+pub use error::Error;
+pub use metadata::{ColumnMetadata, TableMetadata, TablePage};
+pub use settings::ConnectionOptions;
+
 use std::sync::Arc;
 
 use arrow_array::types::TimestampMillisecondType;

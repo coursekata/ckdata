@@ -6,6 +6,8 @@ ckdata is being rebuilt around a Rust core shared by its R and Python packages. 
 
 This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
 
+The Rust core now supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Query execution and the researcher-facing bindings remain in development. Tests use invented configuration and mocked HTTP services.
+
 ## Install
 
 For the working R package, follow the installation instructions in [ckdata-r](https://github.com/coursekata/ckdata-r). This rewrite is not available from CourseKata's R-universe. Its binary-install instructions will be added with the first usable R release.
