@@ -6,8 +6,7 @@ use pyo3_arrow::PyRecordBatchReader;
 #[pyfunction]
 #[pyo3(name = "_core_versions")]
 fn core_versions() -> Vec<String> {
-    let ci_negative_control: Vec<String> = 0;
-    ci_negative_control
+    ckdata::versions()
 }
 
 /// The core's literal probe as an Arrow stream that Polars, pyarrow, pandas and DuckDB each accept.
