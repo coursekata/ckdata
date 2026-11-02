@@ -32,6 +32,8 @@ cd r && Rscript -e 'devtools::test()'
 
 `devtools::document()`, run from `r/`, regenerates the R wrappers after a change to the R crate's exported functions.
 
+The [query integration harness](scripts/query-integration/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. Its offline self-test runs in CI; live checks use restricted test roles and the deployment contract from ck-datalake's `environments/ckdata-test` root.
+
 ```sh
 uv venv --python 3.11 && source .venv/bin/activate
 uvx maturin develop -m python/Cargo.toml

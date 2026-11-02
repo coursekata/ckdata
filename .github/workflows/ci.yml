@@ -34,6 +34,14 @@ jobs:
       - name: Install rustfmt
         run: rustup toolchain install stable --profile minimal --component rustfmt
 
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Check the synthetic query harness offline
+        env:
+          AWS_CONFIG_FILE: /dev/null
+          AWS_SHARED_CREDENTIALS_FILE: /dev/null
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: uv run --locked scripts/query-integration/check.py --self-test
+
       - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         env:
           # quality scans the whole history for secrets.
