@@ -1,28 +1,14 @@
 # ckdata
 
-ckdata reads the CourseKata data lake through Amazon Athena. This repository holds its Rust core and the R and Python packages built on it, which share one implementation of the connection, the query path and the Arrow handoff.
+ckdata is being rebuilt around a Rust core shared by its R and Python packages. This repository currently provides the build layout, CI checks and a synthetic Arrow handoff; the query implementation is planned.
 
 ## Status
 
-This is a pre-release. The packages build, install and pass their checks, but they run no query yet. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The Python package is not released yet.
+This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
 
 ## Install
 
-On macOS and Windows, R installs a binary from CourseKata's R-universe, so no Rust is needed:
-
-```r
-install.packages("ckdata", repos = c("https://coursekata.r-universe.dev", "https://cloud.r-project.org"))
-```
-
-On Linux, R-universe serves binaries from a separate repository for each distribution, architecture and R version, and builds them only for the Ubuntu release its [documentation](https://docs.r-universe.dev/install/binaries.html) names. This points R at the right one for the machine:
-
-```r
-codename <- sub("^VERSION_CODENAME=", "", grep("^VERSION_CODENAME=", readLines("/etc/os-release"), value = TRUE))
-bin <- function(universe) sprintf("https://%s.r-universe.dev/bin/linux/%s-%s/%s/", universe, codename, R.version$arch, sub("\\.[0-9]+$", "", getRversion()))
-install.packages("ckdata", repos = c(bin("coursekata"), bin("cran")))
-```
-
-Anywhere R-universe has no binary, `install.packages()` builds from source, which needs Rust.
+For the working R package, follow the installation instructions in [ckdata-r](https://github.com/coursekata/ckdata-r). This rewrite is not available from CourseKata's R-universe. Its binary-install instructions will be added with the first usable R release.
 
 ## Layout
 
@@ -56,6 +42,8 @@ pytest python/tests
 On Windows, git checks the core's symlink out as a text file unless symlinks are enabled. Turn on Developer Mode, then clone with `git clone -c core.symlinks=true`.
 
 ## Releasing
+
+Publish the first R release only after its query API works and its package tests pass. At that point, add the package to the CourseKata R-universe registry with `subdir: r` and `branch: "*release"`. The current development stub is not published.
 
 1. In one pull request, set the new version in `core/Cargo.toml`, `python/Cargo.toml` and `r/DESCRIPTION`, and merge it.
 2. Tag the merge commit with a lightweight tag and push it: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
