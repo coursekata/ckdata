@@ -28,6 +28,45 @@ pub struct TablePage {
 }
 
 impl Connection {
+    /// Inspect this connection's workgroup configuration without submitting SQL.
+    /// Harnesses can verify their expected output and scan limits before querying.
+    pub async fn workgroup_configuration(
+        &self,
+    ) -> Result<aws_sdk_athena::types::WorkGroupConfiguration, Error> {
+        self.session_status()?;
+        let client = aws_sdk_athena::Client::from_conf(
+            aws_sdk_athena::config::Builder::from(self.aws_config())
+                .timeout_config(
+                    aws_sdk_athena::config::timeout::TimeoutConfig::builder()
+                        .operation_timeout(std::time::Duration::from_secs(10))
+                        .build(),
+                )
+                .build(),
+        );
+        let response = client
+            .get_work_group()
+            .work_group(&self.options().workgroup)
+            .send()
+            .await
+            .map_err(|error| Error::Service {
+                operation: "GetWorkGroup",
+                code: error
+                    .as_service_error()
+                    .and_then(|service| service.code())
+                    .unwrap_or("request failed")
+                    .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
+            })?;
+        let group = response
+            .work_group()
+            .filter(|group| group.state() == Some(&aws_sdk_athena::types::WorkGroupState::Enabled))
+            .ok_or(Error::InvalidServiceResponse("GetWorkGroup"))?;
+        group
+            .configuration()
+            .cloned()
+            .ok_or(Error::InvalidServiceResponse("GetWorkGroup"))
+    }
+
     /// Discover table metadata without submitting a query or fetching result rows.
     pub async fn table_page(&self, next_token: Option<&str>) -> Result<TablePage, Error> {
         self.session_status()?;
@@ -47,6 +86,7 @@ impl Connection {
                     .and_then(|service| service.code())
                     .unwrap_or("request failed")
                     .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
             })?;
         Ok(TablePage {
             tables: response
@@ -79,6 +119,7 @@ impl Connection {
                     .and_then(|service| service.code())
                     .unwrap_or("request failed")
                     .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
             })?;
         response
             .table_metadata()

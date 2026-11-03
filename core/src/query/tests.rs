@@ -359,15 +359,22 @@ async fn cancellation_during_submission_waits_for_query_id_then_stops() {
 }
 
 #[tokio::test]
-async fn submission_errors_retain_idempotency_token_without_raw_service_details() {
+async fn submission_errors_retain_token_and_modeled_guidance_without_signature_details() {
     for response in [
-        json!({"__type": "AccessDeniedException", "Message": "sensitive-synthetic-details"}),
+        json!({"__type": "InvalidRequestException", "Message": "check the configured output location"}),
+        json!({"__type": "SignatureDoesNotMatch", "Message": "synthetic signed authentication detail"}),
         json!({}),
     ] {
         let status = if response.get("__type").is_some() {
             403
         } else {
             200
+        };
+        let expected_code = response["__type"].as_str().map(str::to_owned);
+        let expected_message = if expected_code.as_deref() == Some("InvalidRequestException") {
+            Some("check the configured output location")
+        } else {
+            None
         };
         let http = replay(vec![(200, workgroup()), (status, response)]);
         let error = connection(http.clone())
@@ -379,7 +386,13 @@ async fn submission_errors_retain_idempotency_token_without_raw_service_details(
             )
             .await
             .unwrap_err();
-        assert!(!error.to_string().contains("sensitive-synthetic-details"));
+        assert!(!format!("{error:?} {error}").contains("synthetic signed authentication detail"));
+        if let Error::QuerySubmission { code, message, .. } = &error {
+            assert_eq!(message.as_deref(), expected_message);
+            if let Some(expected_code) = expected_code {
+                assert_eq!(code, &expected_code);
+            }
+        }
         assert!(
             matches!(error, Error::QuerySubmission { request_token, .. } if requests(&http)[1].1["ClientRequestToken"] == request_token)
         );
@@ -394,7 +407,7 @@ async fn polling_failure_unknown_state_and_misdirected_manifest_request_a_stop()
     for (status, response) in [
         (
             403,
-            json!({"__type": "AccessDeniedException", "Message": "sensitive-synthetic-details"}),
+            json!({"__type": "AccessDeniedException", "Message": "check the workgroup permission"}),
         ),
         (200, execution("UNKNOWN_FUTURE_STATE")),
         (200, bad_manifest),
@@ -414,7 +427,12 @@ async fn polling_failure_unknown_state_and_misdirected_manifest_request_a_stop()
             )
             .await
             .unwrap_err();
-        assert!(!error.to_string().contains("sensitive-synthetic-details"));
+        if status == 403 {
+            assert!(
+                matches!(&error, Error::QueryInterrupted { reason: QueryInterruption::RequestFailed { code, message, .. }, .. } if code == "AccessDeniedException" && message.as_deref() == Some("check the workgroup permission"))
+            );
+            assert!(error.to_string().contains("check the workgroup permission"));
+        }
         assert!(
             matches!(error, Error::QueryInterrupted { query_id: Some(id), cancellation: CancellationStatus::Requested, .. } if id == QUERY_ID)
         );

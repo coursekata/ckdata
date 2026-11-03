@@ -357,7 +357,7 @@ async fn server_expiry_can_shorten_but_cannot_extend_the_one_hour_lease() {
 
 #[tokio::test]
 async fn denied_or_already_expired_role_response_never_becomes_a_connection() {
-    let http = replay(403, r#"<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>not logged: synthetic-secret</Message></Error><RequestId>synthetic</RequestId></ErrorResponse>"#.into());
+    let http = replay(403, r#"<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>check the role trust policy</Message></Error><RequestId>synthetic</RequestId></ErrorResponse>"#.into());
     let opts = ConnectionOptions {
         role_arn: Some(ROLE.into()),
         ..options()
@@ -365,13 +365,31 @@ async fn denied_or_already_expired_role_response_never_becomes_a_connection() {
     let error = Connection::from_config(opts.clone(), config(http))
         .await
         .unwrap_err();
-    assert!(matches!(&error, Error::AssumeRole { code } if code == "AccessDenied"));
-    assert!(!format!("{error:?}").contains("synthetic-secret"));
+    assert!(matches!(&error, Error::AssumeRole { code, .. } if code == "AccessDenied"));
+    assert!(error.to_string().contains("check the role trust policy"));
     let http = replay(200, response("2023-12-31T23:59:00Z"));
     assert!(matches!(
         Connection::from_config(opts, config(http)).await,
         Err(Error::InvalidRoleCredentials)
     ));
+}
+
+#[tokio::test]
+async fn role_signature_failure_does_not_expose_signed_authentication_details() {
+    let http = replay(403, r#"<ErrorResponse><Error><Type>Sender</Type><Code>SignatureDoesNotMatch</Code><Message>synthetic signed authentication detail</Message></Error><RequestId>synthetic</RequestId></ErrorResponse>"#.into());
+    let error = Connection::from_config(
+        ConnectionOptions {
+            role_arn: Some(ROLE.into()),
+            ..options()
+        },
+        config(http),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&error, Error::AssumeRole { code, message: None } if code == "SignatureDoesNotMatch")
+    );
+    assert!(!format!("{error:?} {error}").contains("synthetic signed authentication detail"));
 }
 
 #[test]
@@ -478,19 +496,19 @@ async fn catalog_discovery_preserves_types_and_paginates_without_submitting_quer
 }
 
 #[tokio::test]
-async fn catalog_failure_reports_code_without_logging_response_messages() {
+async fn catalog_failure_retains_code_and_modeled_guidance() {
     let http = json_replay(&[(
         400,
-        r#"{"__type":"AccessDeniedException","Message":"not logged: synthetic-private-message"}"#,
+        r#"{"__type":"AccessDeniedException","Message":"check the catalog permission"}"#,
     )]);
     let connection = Connection::from_config(options(), config(http))
         .await
         .unwrap();
     let error = connection.table_metadata("types").await.unwrap_err();
     assert!(
-        matches!(&error, Error::Service { operation: "GetTableMetadata", code } if code == "AccessDeniedException")
+        matches!(&error, Error::Service { operation: "GetTableMetadata", code, .. } if code == "AccessDeniedException")
     );
-    assert!(!format!("{error:?}").contains("synthetic-private-message"));
+    assert!(error.to_string().contains("check the catalog permission"));
     let http = json_replay(&[(200, "{}")]);
     let connection = Connection::from_config(options(), config(http))
         .await

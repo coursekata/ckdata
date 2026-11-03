@@ -13,6 +13,8 @@ use aws_smithy_async::time::StaticTimeSource;
 use aws_smithy_http_client::test_util::infallible_client_fn;
 use aws_types::{SdkConfig, region::Region};
 use parquet::arrow::ArrowWriter;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use serde_json::{Value, json};
 
 use crate::ConnectionOptions;
@@ -32,7 +34,25 @@ enum Mode {
     Timezone,
     BadPresence,
     NoFiles,
+    CompactRows,
+    Expiring,
 }
+
+#[derive(Clone, Copy)]
+enum Encryption {
+    SseS3,
+    Kms {
+        configured: Option<&'static str>,
+        actual: Option<&'static str>,
+    },
+}
+
+const KEY_UUID: &str = "12345678-1234-1234-1234-123456789abc";
+const KEY_ARN: &str = "arn:aws:kms:us-west-2:000000000000:key/12345678-1234-1234-1234-123456789abc";
+const OTHER_KEY: &str =
+    "arn:aws:kms:us-west-2:000000000000:key/87654321-4321-4321-4321-cba987654321";
+const OTHER_ACCOUNT_KEY: &str =
+    "arn:aws:kms:us-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc";
 
 #[derive(Default)]
 struct State {
@@ -42,6 +62,19 @@ struct State {
 }
 
 fn batch(marker: &str, part: usize, mode: Mode) -> RecordBatch {
+    if matches!(mode, Mode::CompactRows) {
+        return RecordBatch::try_from_iter(vec![
+            (
+                "label",
+                Arc::new(StringArray::from(vec!["repeated"; 128])) as ArrayRef,
+            ),
+            (
+                marker,
+                Arc::new(BooleanArray::from(vec![true; 128])) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+    }
     let timestamp = if matches!(mode, Mode::Timezone) {
         DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, Some("UTC".into()))
     } else {
@@ -127,17 +160,40 @@ fn batch(marker: &str, part: usize, mode: Mode) -> RecordBatch {
 
 fn parquet(batch: &RecordBatch) -> Vec<u8> {
     let mut bytes = Vec::new();
-    let mut writer = ArrowWriter::try_new(&mut bytes, batch.schema(), None).unwrap();
+    let properties = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let mut writer = ArrowWriter::try_new(&mut bytes, batch.schema(), Some(properties)).unwrap();
     writer.write(batch).unwrap();
     writer.close().unwrap();
     bytes
 }
 
 async fn service(mode: Mode, token: Option<QueryCancellation>) -> (Connection, Arc<Mutex<State>>) {
+    service_with_encryption(mode, token, Encryption::SseS3).await
+}
+
+async fn service_with_encryption(
+    mode: Mode,
+    token: Option<QueryCancellation>,
+    encryption: Encryption,
+) -> (Connection, Arc<Mutex<State>>) {
     let state = Arc::new(Mutex::new(State::default()));
     let observed = state.clone();
     let http = infallible_client_fn(move |request| {
         let mut state = observed.lock().unwrap();
+        if request.method() == http::Method::POST && request.headers().get("x-amz-target").is_none()
+        {
+            assert!(matches!(mode, Mode::Expiring));
+            state.requests.push("AssumeRole".into());
+            let response = r#"<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASSUMED_TEST</AccessKeyId><SecretAccessKey>synthetic</SecretAccessKey><SessionToken>synthetic</SessionToken><Expiration>2024-01-01T00:10:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>"#;
+            return http::Response::builder()
+                .status(200)
+                .header("content-type", "text/xml")
+                .header("content-length", response.len())
+                .body(response.as_bytes().to_vec())
+                .unwrap();
+        }
         let target = request.headers().get("x-amz-target").map(|value| {
             value
                 .to_str()
@@ -147,7 +203,13 @@ async fn service(mode: Mode, token: Option<QueryCancellation>) -> (Connection, A
                 .unwrap()
                 .to_owned()
         });
-        let configuration = json!({"OutputLocation": OUTPUT, "EncryptionConfiguration": {"EncryptionOption": "SSE_S3"}, "ExpectedBucketOwner": "000000000000"});
+        let mut configuration = json!({"OutputLocation": OUTPUT, "EncryptionConfiguration": {"EncryptionOption": "SSE_S3"}, "ExpectedBucketOwner": "000000000000"});
+        if let Encryption::Kms { configured, .. } = encryption {
+            configuration["EncryptionConfiguration"] = json!({"EncryptionOption": "SSE_KMS"});
+            if let Some(key) = configured {
+                configuration["EncryptionConfiguration"]["KmsKey"] = json!(key);
+            }
+        }
         let (status, body, encrypted) = if let Some(target) = target {
             state.requests.push(target.clone());
             let body = match target.as_str() {
@@ -177,7 +239,7 @@ async fn service(mode: Mode, token: Option<QueryCancellation>) -> (Connection, A
                         .unwrap()
                         .to_owned();
                     state.files = vec![parquet(&batch(&marker, 0, mode))];
-                    if !matches!(mode, Mode::Empty | Mode::AllNull) {
+                    if !matches!(mode, Mode::Empty | Mode::AllNull | Mode::CompactRows) {
                         state.files.push(parquet(&batch(&marker, 1, mode)));
                     }
                     json!({"QueryExecutionId": "synthetic-query"})
@@ -240,7 +302,17 @@ async fn service(mode: Mode, token: Option<QueryCancellation>) -> (Connection, A
             .status(status)
             .header("content-length", body.len());
         if encrypted {
-            response = response.header("x-amz-server-side-encryption", "AES256");
+            response = match encryption {
+                Encryption::SseS3 => response.header("x-amz-server-side-encryption", "AES256"),
+                Encryption::Kms { actual, .. } => {
+                    let response = response.header("x-amz-server-side-encryption", "aws:kms");
+                    if let Some(key) = actual {
+                        response.header("x-amz-server-side-encryption-aws-kms-key-id", key)
+                    } else {
+                        response
+                    }
+                }
+            };
         }
         response.body(body).unwrap()
     });
@@ -258,10 +330,72 @@ async fn service(mode: Mode, token: Option<QueryCancellation>) -> (Connection, A
         .retry_config(RetryConfig::standard().with_max_attempts(1))
         .http_client(http)
         .build();
-    let connection = Connection::from_config(ConnectionOptions::new("synthetic", "schema"), config)
+    let mut options = ConnectionOptions::new("synthetic", "schema");
+    if matches!(mode, Mode::Expiring) {
+        options.role_arn = Some("arn:aws:iam::000000000000:role/synthetic".into());
+    }
+    let connection = Connection::from_config(options, config).await.unwrap();
+    (connection, state)
+}
+
+#[tokio::test]
+async fn successful_query_surfaces_expiry_and_reader_conversion_retains_warnings() {
+    let (connection, _) = service(Mode::Expiring, None).await;
+    let result = connection
+        .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
         .await
         .unwrap();
-    (connection, state)
+    assert!(
+        matches!(result.warnings(),[QueryWarning::SessionExpiring{remaining}] if *remaining<=std::time::Duration::from_secs(600))
+    );
+    let (reader, warnings) = result.into_reader_with_warnings();
+    assert!(matches!(
+        warnings.as_slice(),
+        [QueryWarning::SessionExpiring { .. }]
+    ));
+    assert_eq!(
+        reader.map(|batch| batch.unwrap().num_rows()).sum::<usize>(),
+        4
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn worker_wait_obeys_deadline_and_cancellation_while_worker_is_pending() {
+    use std::time::Duration;
+    let (connection, _) = service(Mode::Rows, None).await;
+    let token = QueryCancellation::new();
+    let start = Instant::now();
+    let guard = RequestGuard {
+        connection: &connection,
+        cancellation: &token,
+        deadline: start + Duration::from_secs(2),
+    };
+    let task = tokio::spawn(async {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        Ok::<_, ResultError>(())
+    });
+    assert!(matches!(
+        wait_for_worker(&guard, task, "test").await,
+        Err(ResultError::Interrupted(QueryInterruption::TimedOut))
+    ));
+    assert_eq!(Instant::now() - start, Duration::from_secs(2));
+    let guard = RequestGuard {
+        connection: &connection,
+        cancellation: &token,
+        deadline: Instant::now() + Duration::from_secs(30),
+    };
+    let task = tokio::spawn(async {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        Ok::<_, ResultError>(())
+    });
+    let (result, ()) = tokio::join!(wait_for_worker(&guard, task, "test"), async {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        token.cancel();
+    });
+    assert!(matches!(
+        result,
+        Err(ResultError::Interrupted(QueryInterruption::Cancelled))
+    ));
 }
 
 #[tokio::test]
@@ -273,42 +407,106 @@ async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files()
         .unwrap();
     assert_eq!(result.row_count(), 4);
     assert!(result.warnings().is_empty());
-    assert_eq!(result.schema().fields().len(), 7);
+    let expected_schema = Schema::new(vec![
+        Field::new("label", DataType::Utf8, true),
+        Field::new("n", DataType::Int64, true),
+        Field::new("s_null", DataType::Utf8, true),
+        Field::new("s_empty", DataType::Utf8, true),
+        Field::new(
+            "ts",
+            DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None),
+            true,
+        ),
+        Field::new("dec", DataType::Decimal128(10, 2), true),
+        Field::new(
+            "arr",
+            DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
+            true,
+        ),
+    ]);
+    assert_eq!(result.schema().as_ref(), &expected_schema);
     let batches: Vec<_> = result.into_reader().collect::<Result<_, _>>().unwrap();
-    let n = batches[0]
+    let batch = arrow_select::concat::concat_batches(&Arc::new(expected_schema), &batches).unwrap();
+    let n = batch
         .column(1)
         .as_any()
         .downcast_ref::<Int64Array>()
         .unwrap();
-    assert_eq!(n.values().as_ref(), &[3, 1, 9_007_199_254_740_993, 9]);
-    let nulls = batches[0]
+    assert_eq!(
+        n.iter().collect::<Vec<_>>(),
+        vec![Some(3), Some(1), Some(9_007_199_254_740_993), Some(9)]
+    );
+    let labels = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(
+        labels.iter().collect::<Vec<_>>(),
+        vec![Some("a"), Some("a"), Some("b"), None]
+    );
+    let nulls = batch
         .column(2)
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    assert!(nulls.is_null(0));
-    assert_eq!(nulls.value(1), "a");
-    let empty = batches[0]
+    assert_eq!(
+        nulls.iter().collect::<Vec<_>>(),
+        vec![None, Some("a"), None, Some("a")]
+    );
+    let empty = batch
         .column(3)
         .as_any()
         .downcast_ref::<StringArray>()
         .unwrap();
-    assert_eq!(empty.value(0), "");
-    assert!(empty.is_null(1));
-    let ts = batches[0]
+    assert_eq!(
+        empty.iter().collect::<Vec<_>>(),
+        vec![Some(""), None, Some(""), None]
+    );
+    let ts = batch
         .column(4)
         .as_any()
         .downcast_ref::<PrimitiveArray<TimestampMillisecondType>>()
         .unwrap();
-    assert_eq!(ts.value(0), 1_792_154_096_789);
     assert_eq!(
-        batches[0].schema().field(5).data_type(),
-        &DataType::Decimal128(10, 2)
+        ts.iter().collect::<Vec<_>>(),
+        vec![Some(1_792_154_096_789), None, Some(1_792_154_096_789), None]
     );
-    assert!(matches!(
-        batches[0].schema().field(6).data_type(),
-        DataType::List(_)
-    ));
+    let decimals = batch
+        .column(5)
+        .as_any()
+        .downcast_ref::<Decimal128Array>()
+        .unwrap();
+    assert_eq!(
+        decimals.iter().collect::<Vec<_>>(),
+        vec![Some(110), None, Some(110), None]
+    );
+    let lists = batch
+        .column(6)
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .unwrap();
+    let lists: Vec<Option<Vec<Option<i64>>>> = lists
+        .iter()
+        .map(|list| {
+            list.map(|list| {
+                list.as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap()
+                    .iter()
+                    .collect()
+            })
+        })
+        .collect();
+    assert_eq!(
+        lists,
+        vec![
+            Some(vec![Some(1), None]),
+            None,
+            Some(vec![Some(1), None]),
+            None
+        ]
+    );
     let state = state.lock().unwrap();
     assert_eq!(
         state
@@ -351,7 +549,7 @@ async fn empty_result_retains_nested_schema_and_all_null_real_rows_survive() {
 }
 
 #[tokio::test]
-async fn invalid_results_fail_without_returning_partial_data_or_raw_rows() {
+async fn invalid_results_fail_without_partial_data_and_retain_modeled_service_guidance() {
     for mode in [
         Mode::BadManifest,
         Mode::BadEncryption,
@@ -366,8 +564,13 @@ async fn invalid_results_fail_without_returning_partial_data_or_raw_rows() {
             .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
             .await
             .unwrap_err();
-        assert!(matches!(error, Error::Result { .. }));
-        assert!(!error.to_string().contains("synthetic detail"));
+        assert!(matches!(&error, Error::Result { .. }));
+        if matches!(mode, Mode::MissingFile) {
+            assert!(
+                matches!(&error, Error::Result { reason: ResultError::Interrupted(QueryInterruption::RequestFailed { code, message, .. }), .. } if code == "NoSuchKey" && message.as_deref() == Some("synthetic detail"))
+            );
+            assert!(error.to_string().contains("synthetic detail"));
+        }
     }
 }
 
@@ -472,4 +675,254 @@ async fn hidden_order_key_returns_an_explicit_warning() {
         [QueryWarning::OrderNotRestored { .. }]
     ));
     assert_eq!(result.row_count(), 4);
+}
+
+#[test]
+fn parquet_result_fixtures_use_snappy() {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let bytes = parquet(&batch("synthetic_presence", 0, Mode::Rows));
+    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes)).unwrap();
+    assert!(
+        reader
+            .metadata()
+            .row_groups()
+            .iter()
+            .flat_map(|group| group.columns())
+            .all(|column| column.compression() == Compression::SNAPPY)
+    );
+}
+
+#[tokio::test]
+async fn public_query_restores_explicit_and_default_null_placement_across_files() {
+    for (order, expected) in [
+        (
+            "ASC NULLS FIRST",
+            vec![
+                (None, 9),
+                (Some("a"), 3),
+                (Some("a"), 1),
+                (Some("b"), 9_007_199_254_740_993),
+            ],
+        ),
+        (
+            "DESC NULLS FIRST",
+            vec![
+                (None, 9),
+                (Some("b"), 9_007_199_254_740_993),
+                (Some("a"), 3),
+                (Some("a"), 1),
+            ],
+        ),
+        (
+            "ASC",
+            vec![
+                (Some("a"), 3),
+                (Some("a"), 1),
+                (Some("b"), 9_007_199_254_740_993),
+                (None, 9),
+            ],
+        ),
+        (
+            "DESC",
+            vec![
+                (Some("b"), 9_007_199_254_740_993),
+                (Some("a"), 3),
+                (Some("a"), 1),
+                (None, 9),
+            ],
+        ),
+    ] {
+        let (connection, _) = service(Mode::Rows, None).await;
+        let result = connection
+            .query(
+                &format!("SELECT label, n FROM synthetic ORDER BY label {order}, n DESC"),
+                &QueryOptions::default(),
+                &QueryCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert!(result.warnings().is_empty());
+        let actual: Vec<_> = result
+            .batches()
+            .iter()
+            .flat_map(|batch| {
+                let labels = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                let ids = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                labels
+                    .iter()
+                    .zip(ids.iter())
+                    .map(|(label, id)| (label.map(str::to_owned), id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let expected: Vec<_> = expected
+            .into_iter()
+            .map(|(label, id)| (label.map(str::to_owned), Some(id)))
+            .collect();
+        assert_eq!(actual, expected, "ORDER BY label {order}");
+    }
+}
+
+#[tokio::test]
+async fn public_query_checks_kms_key_identity_for_arns_and_uuids() {
+    for (configured, actual, accepted) in [
+        (KEY_ARN, Some(KEY_ARN), true),
+        (KEY_UUID, Some(KEY_ARN), true),
+        (KEY_UUID, Some(KEY_UUID), true),
+        (KEY_ARN, Some(OTHER_KEY), false),
+        (KEY_UUID, Some(OTHER_KEY), false),
+        (KEY_ARN, Some(OTHER_ACCOUNT_KEY), false),
+        (KEY_ARN, Some(KEY_UUID), false),
+        (KEY_ARN, None, false),
+        (KEY_UUID, None, false),
+    ] {
+        let (connection, _) = service_with_encryption(
+            Mode::Rows,
+            None,
+            Encryption::Kms {
+                configured: Some(configured),
+                actual,
+            },
+        )
+        .await;
+        let result = connection
+            .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+            .await;
+        if accepted {
+            assert_eq!(result.unwrap().row_count(), 4);
+        } else {
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::Result {
+                        reason: ResultError::EncryptionMismatch,
+                        ..
+                    })
+                ),
+                "configured {configured}, actual {actual:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn public_query_rejects_unverifiable_kms_settings_before_submission() {
+    for configured in [
+        None,
+        Some("alias/synthetic"),
+        Some("arn:aws:kms:us-west-2:000000000000:alias/synthetic"),
+        Some("not-a-key"),
+    ] {
+        let (connection, state) = service_with_encryption(
+            Mode::Rows,
+            None,
+            Encryption::Kms {
+                configured,
+                actual: Some(KEY_ARN),
+            },
+        )
+        .await;
+        assert!(matches!(
+            connection
+                .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+                .await,
+            Err(Error::InvalidSetting(_))
+        ));
+        assert_eq!(state.lock().unwrap().requests, ["GetWorkGroup"]);
+    }
+}
+
+#[tokio::test]
+async fn decoded_array_budget_is_independent_of_parquet_preflight_and_accepts_exact_limit() {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let (connection, state) = service(Mode::CompactRows, None).await;
+    let result = connection
+        .query(
+            "SELECT label FROM synthetic",
+            &QueryOptions::default(),
+            &QueryCancellation::new(),
+        )
+        .await
+        .unwrap();
+    let decoded: usize = result
+        .batches()
+        .iter()
+        .map(RecordBatch::get_array_memory_size)
+        .sum();
+    let file = state.lock().unwrap().files[0].clone();
+    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(file)).unwrap();
+    let uncompressed: usize = reader
+        .metadata()
+        .row_groups()
+        .iter()
+        .map(|group| usize::try_from(group.total_byte_size()).unwrap())
+        .sum();
+    assert!(
+        decoded > uncompressed,
+        "fixture must pass the earlier uncompressed-byte preflight"
+    );
+    for (limit, accepted) in [(decoded - 1, false), (decoded, true)] {
+        let (connection, _) = service(Mode::CompactRows, None).await;
+        let options = QueryOptions {
+            result_limits: ResultLimits {
+                max_decoded_bytes: limit,
+                ..ResultLimits::default()
+            },
+            ..QueryOptions::default()
+        };
+        let result = connection
+            .query(
+                "SELECT label FROM synthetic",
+                &options,
+                &QueryCancellation::new(),
+            )
+            .await;
+        if accepted {
+            assert_eq!(result.unwrap().row_count(), 128);
+        } else {
+            assert!(matches!(
+                result,
+                Err(Error::Result {
+                    reason: ResultError::LimitExceeded("decoded bytes"),
+                    ..
+                })
+            ));
+        }
+    }
+}
+
+#[tokio::test]
+async fn real_row_limit_rejects_the_preflight_allowance_and_accepts_exact_limit() {
+    for (max_rows, accepted) in [(3, false), (4, true)] {
+        let (connection, _) = service(Mode::Rows, None).await;
+        let options = QueryOptions {
+            result_limits: ResultLimits {
+                max_rows,
+                ..ResultLimits::default()
+            },
+            ..QueryOptions::default()
+        };
+        let result = connection
+            .query(SQL, &options, &QueryCancellation::new())
+            .await;
+        if accepted {
+            assert_eq!(result.unwrap().row_count(), 4);
+        } else {
+            assert!(matches!(
+                result,
+                Err(Error::Result {
+                    reason: ResultError::LimitExceeded("row count"),
+                    ..
+                })
+            ));
+        }
+    }
 }

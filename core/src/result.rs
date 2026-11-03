@@ -11,10 +11,11 @@ use crate::query::{RequestGuard, read_query};
 use crate::{Connection, Error, QueryCancellation, QueryInterruption, QueryOptions};
 
 mod decode;
-mod transport;
+mod preflight;
+pub(crate) mod transport;
 
 /// Collection limits, rather than a promise about total process memory. Sorting
-/// temporarily needs concatenated and sorted copies plus row indices. Parquet
+/// temporarily needs bounded sorted runs, output copies and row indices. Parquet
 /// decoding also needs scratch space. Increase limits deliberately for big reads.
 #[derive(Clone, Debug)]
 pub struct ResultLimits {
@@ -23,6 +24,9 @@ pub struct ResultLimits {
     pub max_file_bytes: usize,
     pub max_download_bytes: usize,
     pub max_decoded_bytes: usize,
+    /// Upper bound per compressed/decoded Parquet page. Headers are separately
+    /// limited to 64 KiB; page value counts are capped at one per eight limit bytes.
+    pub max_page_bytes: usize,
     pub max_rows: usize,
     pub batch_size: usize,
     pub download_concurrency: usize,
@@ -36,6 +40,7 @@ impl Default for ResultLimits {
             max_file_bytes: 64 * 1024 * 1024,
             max_download_bytes: 256 * 1024 * 1024,
             max_decoded_bytes: 256 * 1024 * 1024,
+            max_page_bytes: 8 * 1024 * 1024,
             max_rows: 1_000_000,
             batch_size: 8192,
             download_concurrency: 4,
@@ -51,6 +56,7 @@ impl ResultLimits {
             self.max_file_bytes,
             self.max_download_bytes,
             self.max_decoded_bytes,
+            self.max_page_bytes,
             self.max_rows,
             self.batch_size,
             self.download_concurrency,
@@ -71,6 +77,8 @@ pub enum QueryWarning {
     /// The result rows are correct, but this outer ORDER BY cannot be reproduced
     /// from returned columns with supported local sort semantics.
     OrderNotRestored { reason: &'static str },
+    /// Hosts should display this before presenting the next result.
+    SessionExpiring { remaining: std::time::Duration },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -128,8 +136,18 @@ impl QueryResult {
     pub fn row_count(&self) -> usize {
         self.batches.iter().map(RecordBatch::num_rows).sum()
     }
+    /// Transfer the Arrow data. Read `warnings()` first, or use
+    /// `into_reader_with_warnings` to retain host-visible diagnostics.
     pub fn into_reader(self) -> impl RecordBatchReader + Send {
         RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema)
+    }
+
+    /// Preserve warnings when transferring the stream to a language binding.
+    pub fn into_reader_with_warnings(self) -> (impl RecordBatchReader + Send, Vec<QueryWarning>) {
+        (
+            RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema),
+            self.warnings,
+        )
     }
 }
 
@@ -182,7 +200,7 @@ impl Connection {
                     .await?;
                     let connection = self.clone();
                     let limits = options.result_limits.clone();
-                    let decoded = tokio::task::spawn_blocking(move || {
+                    let task = tokio::task::spawn_blocking(move || {
                         decode::decode(
                             bytes,
                             &marker,
@@ -194,9 +212,8 @@ impl Connection {
                                 deadline,
                             },
                         )
-                    })
-                    .await
-                    .map_err(|_| ResultError::InvalidParquet("decoder task failed"))??;
+                    });
+                    let decoded = wait_for_worker(guard, task, "decoder task failed").await?;
                     Ok::<_, ResultError>((index, decoded))
                 }
             })
@@ -251,34 +268,39 @@ impl Connection {
             result_error(&execution.query_id, ResultError::Interrupted(reason))
         })?;
         let plan = crate::ordering::plan(&query, &schema);
-        let (batches, warnings) = match plan {
+        let (batches, mut warnings) = match plan {
             Ok(keys) if !keys.is_empty() && rows > 1 => {
                 let connection = self.clone();
                 let cancellation = result_cancellation.clone();
-                let sorted = tokio::task::spawn_blocking(move || {
+                let task = tokio::task::spawn_blocking(move || {
                     let guard = RequestGuard {
                         connection: &connection,
                         cancellation: &cancellation,
                         deadline,
                     };
                     guard.check().map_err(ResultError::Interrupted)?;
-                    let batches = crate::ordering::sort(batches, &keys)?;
+                    let batches = crate::ordering::sort(batches, &keys, &guard)?;
                     guard.check().map_err(ResultError::Interrupted)?;
                     Ok::<_, ResultError>(batches)
-                })
-                .await
-                .map_err(|_| {
-                    result_error(
-                        &execution.query_id,
-                        ResultError::InvalidParquet("sort task failed"),
-                    )
-                })?
-                .map_err(|reason| result_error(&execution.query_id, reason))?;
+                });
+                let sorted = wait_for_worker(&guard, task, "sort task failed")
+                    .await
+                    .map_err(|reason| result_error(&execution.query_id, reason))?;
                 (sorted, vec![])
             }
             Ok(_) => (batches, vec![]),
             Err(warning) => (batches, vec![warning]),
         };
+        if let crate::SessionStatus::Expiring { remaining, .. } =
+            self.session_status().map_err(|_| {
+                result_error(
+                    &execution.query_id,
+                    ResultError::Interrupted(QueryInterruption::SessionExpired),
+                )
+            })?
+        {
+            warnings.push(QueryWarning::SessionExpiring { remaining });
+        }
         Ok(QueryResult {
             query_id: execution.query_id,
             schema,
@@ -306,7 +328,21 @@ struct Budget {
     downloaded: AtomicUsize,
     uncompressed: AtomicUsize,
     decoded: AtomicUsize,
+    expanded: AtomicUsize,
     rows: AtomicUsize,
+    returned_rows: AtomicUsize,
+}
+
+async fn wait_for_worker<T>(
+    guard: &RequestGuard<'_>,
+    task: tokio::task::JoinHandle<Result<T, ResultError>>,
+    failure: &'static str,
+) -> Result<T, ResultError> {
+    guard
+        .run(async { Ok(task.await) })
+        .await
+        .map_err(ResultError::Interrupted)?
+        .map_err(|_| ResultError::InvalidParquet(failure))?
 }
 
 fn reserve(

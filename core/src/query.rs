@@ -62,10 +62,11 @@ pub enum QueryInterruption {
     TimedOut,
     #[error("assumed-role session expired")]
     SessionExpired,
-    #[error("AWS {operation} failed ({code})")]
+    #[error("AWS {operation} failed ({code}){detail}", detail = crate::error::message_suffix(.message))]
     RequestFailed {
         operation: &'static str,
         code: String,
+        message: Option<String>,
     },
     #[error("AWS returned an invalid {0}")]
     InvalidResponse(&'static str),
@@ -154,6 +155,7 @@ impl Connection {
                             .and_then(|error| error.code())
                             .unwrap_or("request failed")
                             .to_owned(),
+                        message: crate::error::service_message(error.as_service_error()),
                     })
             })
             .await
@@ -183,6 +185,19 @@ impl Connection {
         {
             return Err(Error::InvalidSetting(
                 "workgroup encryption must use server-side encryption",
+            ));
+        }
+        if configuration
+            .encryption_configuration()
+            .is_some_and(|encryption| {
+                encryption.encryption_option() == &EncryptionOption::SseKms
+                    && encryption
+                        .kms_key()
+                        .is_none_or(|key| !crate::result::transport::valid_kms_key(key))
+            })
+        {
+            return Err(Error::InvalidSetting(
+                "workgroup KMS key must be a key ARN or UUID",
             ));
         }
         let request_token = Uuid::new_v4().to_string();
@@ -223,6 +238,7 @@ impl Connection {
                     .and_then(|error| error.code())
                     .unwrap_or("request failed; submission outcome unknown")
                     .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
                 request_token: request_token.clone(),
             })?;
         let query_id = started
@@ -230,6 +246,7 @@ impl Connection {
             .filter(|id| !id.is_empty())
             .ok_or_else(|| Error::QuerySubmission {
                 code: "missing query ID; submission outcome unknown".to_owned(),
+                message: None,
                 request_token,
             })?
             .to_owned();
@@ -278,6 +295,7 @@ impl Connection {
                                 .and_then(|error| error.code())
                                 .unwrap_or("request failed")
                                 .to_owned(),
+                            message: crate::error::service_message(error.as_service_error()),
                         })
                 })
                 .await?;

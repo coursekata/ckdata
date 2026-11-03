@@ -175,6 +175,7 @@ impl Connection {
                         .and_then(|service| service.code())
                         .unwrap_or("request failed")
                         .to_owned(),
+                    message: crate::error::service_message(error.as_service_error()),
                 })?;
             let returned = response
                 .credentials()
@@ -238,6 +239,7 @@ impl Connection {
                     .and_then(|service| service.code())
                     .unwrap_or("request failed")
                     .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
             })?;
         let account = identity
             .account()

@@ -29,7 +29,7 @@ use bytes::Bytes;
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
-/// The core's version, then the version of each AWS SDK crate it links.
+/// The core version, then the Athena and S3 SDK versions.
 pub fn versions() -> Vec<String> {
     vec![
         format!("ckdata {}", env!("CARGO_PKG_VERSION")),

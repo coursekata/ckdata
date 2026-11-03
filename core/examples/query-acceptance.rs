@@ -1,5 +1,6 @@
 //! Fixed, synthetic-value acceptance checks. No arbitrary SQL, cleanup or IAM writes.
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -12,6 +13,7 @@ use arrow_array::{
 };
 use aws_config::BehaviorVersion;
 use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
+use aws_sdk_athena::types::{EncryptionOption, WorkGroupConfiguration};
 use aws_types::{SdkConfig, region::Region};
 use ckdata::{
     CallerIdentity, Connection, ConnectionOptions, Error, QueryCancellation, QueryInterruption,
@@ -111,7 +113,7 @@ fn validate(deployment: &Deployment, region: Option<&str>) -> Result<(), String>
         "unexpected fixture keys",
     )?;
     require(
-        !deployment.region.is_empty() && region.is_none_or(|region| region == deployment.region),
+        deployment.region == "us-west-2" && region.is_none_or(|region| region == deployment.region),
         "region differs from the deployment contract",
     )?;
     require(
@@ -124,9 +126,10 @@ fn validate(deployment: &Deployment, region: Option<&str>) -> Result<(), String>
     )?;
     require(
         !deployment.operator_role_arns.is_empty()
-            && deployment.operator_role_arns.iter().all(|arn| {
-                arn.starts_with(&format!("arn:aws:iam::{account}:role/")) && !arn.contains('*')
-            }),
+            && deployment
+                .operator_role_arns
+                .iter()
+                .all(|arn| role_account(arn).is_some()),
         "invalid operator role fence",
     )?;
     for (name, seat) in &deployment.seats {
@@ -175,12 +178,68 @@ fn identity_matches(identity: &CallerIdentity, account: &str, role: &str) -> boo
 }
 
 fn safe_core_error(error: Error) -> String {
-    match error {
-        Error::QueryFailed { query_id, .. } => {
-            format!("Athena failed; query_id={query_id}; inspect its reason in Athena")
-        }
-        error => error.to_string(),
-    }
+    error.to_string()
+}
+
+fn role_account(arn: &str) -> Option<&str> {
+    let (account, name) = arn.strip_prefix("arn:aws:iam::")?.split_once(":role/")?;
+    (account_valid(account)
+        && !name.is_empty()
+        && name
+            .bytes()
+            .all(|ch| ch.is_ascii_alphanumeric() || b"+=,.@_/-".contains(&ch)))
+    .then_some(account)
+}
+
+fn operator_matches(identity: &CallerIdentity, role: &str) -> bool {
+    role_account(role).is_some_and(|account| identity_matches(identity, account, role))
+}
+
+fn validate_workgroup(
+    config: &WorkGroupConfiguration,
+    seat: &Seat,
+    account: &str,
+) -> Result<(), String> {
+    require(
+        config.enforce_work_group_configuration() == Some(true),
+        "workgroup controls are not enforced",
+    )?;
+    require(
+        config.bytes_scanned_cutoff_per_query() == Some(10 * 1024 * 1024),
+        "workgroup scan cutoff differs from the 10 MiB fixture contract",
+    )?;
+    require(
+        config
+            .engine_version()
+            .and_then(|engine| engine.selected_engine_version())
+            == Some("Athena engine version 3"),
+        "unexpected Athena engine",
+    )?;
+    let result = config
+        .result_configuration()
+        .ok_or("workgroup has no result configuration")?;
+    require(
+        result.output_location() == Some(seat.output_location.as_str()),
+        "workgroup output differs from the synthetic deployment",
+    )?;
+    require(
+        result.expected_bucket_owner() == Some(account)
+            && result.encryption_configuration().is_some_and(|encryption| {
+                encryption.encryption_option() == &EncryptionOption::SseS3
+                    && encryption.kms_key().is_none()
+            }),
+        "workgroup owner or encryption differs from the fixture contract",
+    )
+}
+
+fn read_contract(reader: impl Read) -> Result<Deployment, String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(65536 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "cannot read deployment contract")?;
+    require(bytes.len() <= 65536, "deployment contract is too large")?;
+    serde_json::from_slice(&bytes).map_err(|_| "invalid deployment contract".to_owned())
 }
 
 async fn source_role(config: SdkConfig, role: &str) -> Result<SdkConfig, String> {
@@ -229,14 +288,16 @@ fn check_types(result: &QueryResult) -> Result<(), String> {
         result.row_count() == 2 && result.warnings().is_empty(),
         "literal count or ordering warning changed",
     )?;
-    let batch = result
-        .batches()
-        .first()
-        .ok_or("literal result has no batches")?;
-    require(
-        result.batches().len() == 1 && batch.num_rows() == 2,
-        "ordered probe was not combined",
-    )?;
+    check_probe_batches(&result.schema(), result.batches())
+}
+
+fn check_probe_batches(
+    schema: &arrow_schema::SchemaRef,
+    batches: &[arrow_array::RecordBatch],
+) -> Result<(), String> {
+    // The bounded reader may retain several batches even for this two-row probe.
+    let batch = arrow_select::concat::concat_batches(schema, batches)
+        .map_err(|_| "cannot combine the fixed probe")?;
     let id = batch
         .column(0)
         .as_any()
@@ -291,21 +352,27 @@ fn check_types(result: &QueryResult) -> Result<(), String> {
         .downcast_ref::<ListArray>()
         .ok_or("array type changed")?;
     require(
-        id.values().as_ref() == [2, 1]
+        id.iter().eq([Some(2), Some(1)])
+            && !nulls.is_null(0)
             && nulls.value(0) == "a"
             && nulls.is_null(1)
+            && !empty.is_null(0)
             && empty.value(0) == "b"
             && !empty.is_null(1)
             && empty.value(1).is_empty()
             && big.is_null(0)
+            && !big.is_null(1)
             && big.value(1) == 9_007_199_254_740_993
             && dec.is_null(0)
+            && !dec.is_null(1)
+            && dec.precision() == 3
             && dec.value(1) == 110
             && dec.scale() == 2
             && timestamp.is_null(0)
             && !timestamp.is_null(1)
             && timestamp_ns == 1_792_154_096_789_000_000
             && arr.is_null(0)
+            && !arr.is_null(1)
             && arr.value_length(1) == 2,
         "literal values changed",
     )?;
@@ -314,7 +381,7 @@ fn check_types(result: &QueryResult) -> Result<(), String> {
         .as_any()
         .downcast_ref::<Int32Array>()
         .ok_or("array element type changed")?;
-    require(values.values().as_ref() == [1, 2], "array values changed")
+    require(values.iter().eq([Some(1), Some(2)]), "array values changed")
 }
 
 async fn checks(
@@ -365,16 +432,33 @@ async fn checks(
     Ok(())
 }
 
+async fn load_sdk_config(profile: Option<String>, region: Option<String>) -> SdkConfig {
+    let mut loader = aws_config::defaults(BehaviorVersion::latest());
+    if let Some(profile) = profile {
+        loader = loader.profile_name(profile);
+    }
+    if let Some(region) = region {
+        loader = loader.region(Region::new(region));
+    }
+    loader.load().await
+}
+
 async fn run(args: Args) -> Result<(), String> {
+    run_with_loader(args, load_sdk_config).await
+}
+
+async fn run_with_loader<F, Fut>(args: Args, load: F) -> Result<(), String>
+where
+    F: FnOnce(Option<String>, Option<String>) -> Fut,
+    Fut: std::future::Future<Output = SdkConfig>,
+{
     // Validate all offline inputs before resolving credentials or making clients.
     let deployment = args
         .deployment
         .as_ref()
         .map(|path| {
-            let bytes = std::fs::read(path).map_err(|_| "cannot read deployment contract")?;
-            require(bytes.len() <= 65536, "deployment contract is too large")?;
-            let deployment: Deployment =
-                serde_json::from_slice(&bytes).map_err(|_| "invalid deployment contract")?;
+            let file = std::fs::File::open(path).map_err(|_| "cannot read deployment contract")?;
+            let deployment = read_contract(file)?;
             validate(&deployment, args.region.as_deref())?;
             Ok::<_, String>(deployment)
         })
@@ -395,18 +479,11 @@ async fn run(args: Args) -> Result<(), String> {
             "expected account must have twelve digits",
         )?;
     }
-    let mut loader = aws_config::defaults(BehaviorVersion::latest());
-    if let Some(profile) = args.profile {
-        loader = loader.profile_name(profile);
-    }
-    if let Some(region) = deployment
+    let region = deployment
         .as_ref()
         .map(|deployment| deployment.region.clone())
-        .or(args.region)
-    {
-        loader = loader.region(Region::new(region));
-    }
-    let base = loader.load().await;
+        .or(args.region);
+    let base = load(args.profile, region).await;
     let mut connections = Vec::new();
     if let Some(deployment) = deployment {
         let operator = Connection::connect_with_config(
@@ -420,7 +497,7 @@ async fn run(args: Args) -> Result<(), String> {
             deployment
                 .operator_role_arns
                 .iter()
-                .any(|role| identity_matches(&identity, &deployment.account_id, role)),
+                .any(|role| operator_matches(&identity, role)),
             "operator identity is not admitted by the synthetic deployment",
         )?;
         for (name, seat) in deployment.seats {
@@ -445,7 +522,7 @@ async fn run(args: Args) -> Result<(), String> {
                     "synthetic source identity differs",
                 )?;
             }
-            let mut options = ConnectionOptions::new(seat.workgroup, &deployment.database);
+            let mut options = ConnectionOptions::new(&seat.workgroup, &deployment.database);
             options.role_arn = Some(seat.role_arn.clone());
             let connection = Connection::connect_with_config(options, config)
                 .await
@@ -461,7 +538,12 @@ async fn run(args: Args) -> Result<(), String> {
                 ),
                 "synthetic reader identity differs",
             )?;
-            println!("PASS {name}: expected synthetic account and reader");
+            let workgroup = connection
+                .workgroup_configuration()
+                .await
+                .map_err(safe_core_error)?;
+            validate_workgroup(&workgroup, &seat, &deployment.account_id)?;
+            println!("PASS {name}: expected synthetic account, reader and workgroup fence");
             checks(&connection, Some(&deployment.table), true).await?;
             connections.push(connection);
         }
@@ -549,6 +631,43 @@ async fn main() -> std::process::ExitCode {
 mod tests {
     use super::*;
     #[test]
+    fn fixed_probe_accepts_two_ordered_one_row_batches() {
+        use arrow_array::{ArrayRef, RecordBatch, types::Int32Type};
+        use std::sync::Arc;
+        let list =
+            ListArray::from_iter_primitive::<Int32Type, _, _>([None, Some(vec![Some(1), Some(2)])]);
+        let batch = RecordBatch::try_from_iter(vec![
+            ("id", Arc::new(Int32Array::from(vec![2, 1])) as ArrayRef),
+            (
+                "s_null",
+                Arc::new(StringArray::from(vec![Some("a"), None])) as _,
+            ),
+            ("s_empty", Arc::new(StringArray::from(vec!["b", ""])) as _),
+            (
+                "big",
+                Arc::new(Int64Array::from(vec![None, Some(9_007_199_254_740_993)])) as _,
+            ),
+            (
+                "dec",
+                Arc::new(
+                    Decimal128Array::from(vec![None, Some(110)])
+                        .with_precision_and_scale(3, 2)
+                        .unwrap(),
+                ) as _,
+            ),
+            (
+                "ts",
+                Arc::new(PrimitiveArray::<TimestampMillisecondType>::from(vec![
+                    None,
+                    Some(1_792_154_096_789),
+                ])) as _,
+            ),
+            ("arr", Arc::new(list) as _),
+        ])
+        .unwrap();
+        check_probe_batches(&batch.schema(), &[batch.slice(0, 1), batch.slice(1, 1)]).unwrap();
+    }
+    #[test]
     fn help_and_live_gate_require_no_aws_configuration() {
         assert!(Args::try_parse_from(["probe", "--help"]).is_err());
         let args = Args::try_parse_from([
@@ -569,6 +688,295 @@ mod tests {
                 .is_err()
         );
     }
+    fn args_without_live() -> Args {
+        Args::try_parse_from([
+            "probe",
+            "--workgroup",
+            "fake",
+            "--schema",
+            "fake",
+            "--expected-account",
+            "000000000000",
+            "--expected-role",
+            "arn:aws:iam::000000000000:role/fake",
+        ])
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn offline_gate_executes_before_the_sdk_loader() {
+        let error = run_with_loader(args_without_live(), |_, _| async {
+            panic!("SDK configuration must not be loaded")
+        })
+        .await
+        .unwrap_err();
+        assert!(error.contains("no AWS clients created"));
+    }
+
+    fn deployment_contract() -> serde_json::Value {
+        serde_json::json!({
+            "format_version": 1, "purpose": "ckdata-synthetic-tests",
+            "account_id": "000000000000", "region": "us-west-2",
+            "bucket": "ck-datalake-tst-ckdata-fixtures-000000000000",
+            "database": "ck_datalake_tst_ckdata_fixtures", "table": "types",
+            "fixture_keys": ["fixtures/types/part-1.parquet", "fixtures/types/part-2.parquet"],
+            "operator_role_arns": ["arn:aws:iam::111111111111:role/operator"],
+            "seats": {
+                "internal": {
+                    "role_arn": "arn:aws:iam::000000000000:role/ck-datalake-tst-ckdata-internal-reader",
+                    "source_role_arn": null, "workgroup": "ck-datalake-tst-ckdata-internal",
+                    "output_location": "s3://ck-datalake-tst-ckdata-fixtures-000000000000/results/internal/"
+                },
+                "research": {
+                    "role_arn": "arn:aws:iam::000000000000:role/ck-datalake-tst-ckdata-research-reader",
+                    "source_role_arn": "arn:aws:iam::000000000000:role/ck-datalake-tst-ckdata-source",
+                    "workgroup": "ck-datalake-tst-ckdata-research",
+                    "output_location": "s3://ck-datalake-tst-ckdata-fixtures-000000000000/results/research/"
+                }
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn invalid_contract_executes_before_the_sdk_loader() {
+        let contract = deployment_contract();
+        let deployment: Deployment = serde_json::from_value(contract.clone()).unwrap();
+        assert!(validate(&deployment, None).is_ok());
+        for (field, invalid) in [("region", "us-east-1"), ("bucket", "near-miss-tst-bucket")] {
+            let path =
+                std::env::temp_dir().join(format!("ckdata-invalid-{}.json", uuid::Uuid::new_v4()));
+            let mut changed = contract.clone();
+            changed[field] = serde_json::json!(invalid);
+            std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+            let mut args = args_without_live();
+            args.run_live = true;
+            args.deployment = Some(path.clone());
+            let result = run_with_loader(args, |_, _| async {
+                panic!("invalid contract must not load SDK configuration")
+            })
+            .await;
+            std::fs::remove_file(path).unwrap();
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn contract_read_is_bounded_before_json_allocation() {
+        struct LargeInput {
+            count: std::rc::Rc<std::cell::Cell<usize>>,
+        }
+        impl Read for LargeInput {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                self.count.set(self.count.get() + buffer.len());
+                buffer.fill(b' ');
+                Ok(buffer.len())
+            }
+        }
+        let count = std::rc::Rc::new(std::cell::Cell::new(0));
+        assert_eq!(
+            read_contract(LargeInput {
+                count: count.clone()
+            })
+            .unwrap_err(),
+            "deployment contract is too large"
+        );
+        assert_eq!(count.get(), 65537);
+    }
+
+    #[test]
+    fn admitted_operators_can_be_in_another_account() {
+        let identity = CallerIdentity {
+            account: "111111111111".into(),
+            arn: "arn:aws:sts::111111111111:assumed-role/operator/session".into(),
+        };
+        assert!(operator_matches(
+            &identity,
+            "arn:aws:iam::111111111111:role/path/operator"
+        ));
+        assert!(!operator_matches(
+            &identity,
+            "arn:aws:iam::000000000000:role/operator"
+        ));
+        for invalid in [
+            "arn:aws:iam::111111111111:role/*",
+            "arn:aws:iam::111111111111:root",
+            "arn:aws:iam::111111111111:role/",
+        ] {
+            assert!(role_account(invalid).is_none());
+        }
+    }
+
+    fn fixture_seat() -> Seat {
+        Seat {
+            output_location: "s3://synthetic/results/internal/".into(),
+            role_arn: "arn:aws:iam::000000000000:role/synthetic".into(),
+            source_role_arn: None,
+            workgroup: "synthetic".into(),
+        }
+    }
+
+    fn fixture_workgroup() -> WorkGroupConfiguration {
+        use aws_sdk_athena::types::{EncryptionConfiguration, EngineVersion, ResultConfiguration};
+        WorkGroupConfiguration::builder()
+            .enforce_work_group_configuration(true)
+            .bytes_scanned_cutoff_per_query(10 * 1024 * 1024)
+            .engine_version(
+                EngineVersion::builder()
+                    .selected_engine_version("Athena engine version 3")
+                    .build(),
+            )
+            .result_configuration(
+                ResultConfiguration::builder()
+                    .output_location("s3://synthetic/results/internal/")
+                    .expected_bucket_owner("000000000000")
+                    .encryption_configuration(
+                        EncryptionConfiguration::builder()
+                            .encryption_option(EncryptionOption::SseS3)
+                            .build()
+                            .unwrap(),
+                    )
+                    .build(),
+            )
+            .build()
+    }
+
+    #[test]
+    fn live_workgroup_drift_rejects_before_query_submission() {
+        let seat = fixture_seat();
+        let config = fixture_workgroup();
+        assert!(validate_workgroup(&config, &seat, "000000000000").is_ok());
+        let mut missing_cutoff = config.clone();
+        missing_cutoff.bytes_scanned_cutoff_per_query = None;
+        let mut excessive_cutoff = config.clone();
+        excessive_cutoff.bytes_scanned_cutoff_per_query = Some(10 * 1024 * 1024 + 1);
+        let mut unenforced = config.clone();
+        unenforced.enforce_work_group_configuration = Some(false);
+        let mut output_drift = config.clone();
+        output_drift
+            .result_configuration
+            .as_mut()
+            .unwrap()
+            .output_location = Some("s3://other/results/".into());
+        let mut owner_drift = config.clone();
+        owner_drift
+            .result_configuration
+            .as_mut()
+            .unwrap()
+            .expected_bucket_owner = Some("111111111111".into());
+        let mut missing_encryption = config;
+        missing_encryption
+            .result_configuration
+            .as_mut()
+            .unwrap()
+            .encryption_configuration = None;
+        let changes = [
+            missing_cutoff,
+            excessive_cutoff,
+            unenforced,
+            output_drift,
+            owner_drift,
+            missing_encryption,
+        ];
+        for changed in changes {
+            let submissions = std::cell::Cell::new(0);
+            let result = validate_workgroup(&changed, &seat, "000000000000")
+                .map(|()| submissions.set(submissions.get() + 1));
+            assert!(result.is_err());
+            assert_eq!(submissions.get(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn deployment_drift_stops_the_real_run_before_start_query() {
+        use aws_config::retry::RetryConfig;
+        use aws_smithy_async::time::StaticTimeSource;
+        use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+        use aws_smithy_types::body::SdkBody;
+        for (field, value, reason) in [
+            (
+                "OutputLocation",
+                serde_json::json!("s3://other/results/"),
+                "workgroup output differs",
+            ),
+            (
+                "BytesScannedCutoffPerQuery",
+                serde_json::Value::Null,
+                "workgroup scan cutoff differs",
+            ),
+        ] {
+            let mut configuration = serde_json::json!({
+                "EnforceWorkGroupConfiguration": true,
+                "BytesScannedCutoffPerQuery": 10485760,
+                "EngineVersion": {"SelectedEngineVersion": "Athena engine version 3"},
+                "ResultConfiguration": {
+                    "OutputLocation": "s3://ck-datalake-tst-ckdata-fixtures-000000000000/results/internal/",
+                    "ExpectedBucketOwner": "000000000000",
+                    "EncryptionConfiguration": {"EncryptionOption": "SSE_S3"}
+                }
+            });
+            if field == "OutputLocation" {
+                configuration["ResultConfiguration"][field] = value;
+            } else {
+                configuration[field] = value;
+            }
+            let operator = r#"<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><GetCallerIdentityResult><Account>111111111111</Account><Arn>arn:aws:sts::111111111111:assumed-role/operator/session</Arn></GetCallerIdentityResult></GetCallerIdentityResponse>"#;
+            let assumed = r#"<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>SYNTHETIC</AccessKeyId><SecretAccessKey>synthetic-secret</SecretAccessKey><SessionToken>synthetic-token</SessionToken><Expiration>2024-01-01T01:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>"#;
+            let reader = r#"<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><GetCallerIdentityResult><Account>000000000000</Account><Arn>arn:aws:sts::000000000000:assumed-role/ck-datalake-tst-ckdata-internal-reader/session</Arn></GetCallerIdentityResult></GetCallerIdentityResponse>"#;
+            let group = serde_json::json!({"WorkGroup": {"Name": "ck-datalake-tst-ckdata-internal", "State": "ENABLED", "Configuration": configuration}}).to_string();
+            let http = StaticReplayClient::new(
+                [
+                    ("text/xml", operator),
+                    ("text/xml", assumed),
+                    ("text/xml", reader),
+                    ("application/x-amz-json-1.1", group.as_str()),
+                ]
+                .into_iter()
+                .map(|(kind, body)| {
+                    ReplayEvent::new(
+                        http::Request::new(SdkBody::empty()),
+                        http::Response::builder()
+                            .status(200)
+                            .header("content-type", kind)
+                            .body(SdkBody::from(body))
+                            .unwrap(),
+                    )
+                })
+                .collect(),
+            );
+            let config = SdkConfig::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .region(Region::new("us-west-2"))
+                .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
+                    "SYNTHETIC",
+                    "synthetic-secret",
+                    None,
+                    None,
+                    "synthetic-test",
+                )))
+                .time_source(StaticTimeSource::from_secs(1_704_067_200))
+                .retry_config(RetryConfig::standard().with_max_attempts(1))
+                .http_client(http.clone())
+                .build();
+            let path =
+                std::env::temp_dir().join(format!("ckdata-drift-{}.json", uuid::Uuid::new_v4()));
+            std::fs::write(&path, serde_json::to_vec(&deployment_contract()).unwrap()).unwrap();
+            let mut args = args_without_live();
+            args.run_live = true;
+            args.deployment = Some(path.clone());
+            let error = run_with_loader(args, |_, _| async { config })
+                .await
+                .unwrap_err();
+            std::fs::remove_file(path).unwrap();
+            assert!(error.contains(reason), "{error}");
+            let requests: Vec<_> = http.actual_requests().collect();
+            assert_eq!(requests.len(), 4);
+            assert_eq!(
+                requests[3].headers().get("x-amz-target"),
+                Some("AmazonAthena.GetWorkGroup")
+            );
+        }
+    }
+
     #[test]
     fn identity_fence_matches_exact_role_name_and_account() {
         let identity = CallerIdentity {
