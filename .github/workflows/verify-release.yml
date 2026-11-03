@@ -79,7 +79,8 @@ jobs:
       - name: Check R-universe built for this Linux release
         if: runner.os == 'Linux'
         run: |
-          . /etc/os-release
+          VERSION_CODENAME=$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release | tr -d '"')
+          test -n "$VERSION_CODENAME"
           built=$(curl -fsS "$UNIVERSE/api/packages/$PACKAGE" | jq -r --arg v "$VERSION" '
             [._binaries[] | select(.os == "linux" and .version == $v and .status == "success") | .distro] | unique | join(", ")')
           case ", $built, " in

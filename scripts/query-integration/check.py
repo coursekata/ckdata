@@ -1,6 +1,8 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["boto3>=1.40,<2", "pyarrow>=21,<26"]
+# dependencies = ["boto3>=1.40,<2", "pyarrow>=26,<27"]
+# [tool.uv]
+# exclude-newer = "7 days"
 # ///
 """Check the independently deployed synthetic ckdata environment.
 
@@ -21,8 +23,6 @@ from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
-
-from botocore.exceptions import BotoCoreError, ClientError
 
 PROBE = """SELECT * FROM (VALUES
 (1, CAST(NULL AS VARCHAR), '', BIGINT '9007199254740993',
@@ -96,6 +96,28 @@ def quote_identifier(identifier):
 def check_types(table):
     import pyarrow as pa
 
+    timestamp = table.schema.field("ts").type
+    require(
+        pa.types.is_timestamp(timestamp)
+        and timestamp.tz is None
+        and timestamp.unit in {"ms", "us", "ns"},
+        "timestamp type, precision or timezone changed",
+    )
+    expected = pa.schema(
+        [
+            ("id", pa.int32()),
+            ("s_null", pa.string()),
+            ("s_empty", pa.string()),
+            ("big", pa.int64()),
+            ("dec", pa.decimal128(3, 2)),
+            ("ts", timestamp),
+            ("arr", pa.list_(pa.int32())),
+        ]
+    )
+    require(
+        table.schema.equals(expected, check_metadata=False),
+        f"literal Arrow schema changed: {table.schema}",
+    )
     rows = sorted(table.to_pylist(), key=lambda row: row["id"])
     require(len(rows) == 2, "literal probe did not return exactly two rows")
     require(
@@ -154,12 +176,23 @@ class Probe:
             == "Athena engine version 3",
             "unexpected Athena engine",
         )
+        if expected_output is not None:
+            require(
+                config.get("BytesScannedCutoffPerQuery") == 10 * 1024 * 1024,
+                "workgroup scan cutoff differs from the 10 MiB fixture contract",
+            )
         result = config["ResultConfiguration"]
         self.output = result["OutputLocation"].rstrip("/") + "/"
         if expected_output is not None:
             require(
                 self.output == expected_output,
                 "workgroup output differs from the test deployment",
+            )
+            require(
+                result.get("ExpectedBucketOwner") == account
+                and result.get("EncryptionConfiguration")
+                == {"EncryptionOption": "SSE_S3"},
+                "workgroup owner or encryption differs from the fixture contract",
             )
         s3_location(self.output)
         self.encryption = result.get("EncryptionConfiguration", {})
@@ -177,13 +210,15 @@ class Probe:
                 "Database": self.database,
             },
         )["QueryExecutionId"]
-        deadline = time.monotonic() + 180
+        terminal = False
         try:
+            deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 query = self.athena.get_query_execution(QueryExecutionId=query_id)[
                     "QueryExecution"
                 ]
                 state = query["Status"]["State"]
+                terminal = state in {"SUCCEEDED", "FAILED", "CANCELLED"}
                 if state == "SUCCEEDED":
                     require(
                         query.get("WorkGroup") == self.workgroup,
@@ -205,14 +240,17 @@ class Probe:
                 )
                 time.sleep(0.5)
             raise TimeoutError(f"query timed out; query_id={query_id}")
-        except (TimeoutError, KeyboardInterrupt):
-            try:
-                self.athena.stop_query_execution(QueryExecutionId=query_id)
-            except (BotoCoreError, ClientError):
-                print(
-                    f"WARN cancellation unconfirmed; query_id={query_id}",
-                    file=sys.stderr,
-                )
+        except BaseException:
+            # Once a query exists, every abnormal nonterminal exit needs a stop.
+            if not terminal:
+                try:
+                    self.athena.stop_query_execution(QueryExecutionId=query_id)
+                except (Exception, KeyboardInterrupt):  # noqa: BLE001 -- preserve the original failure after a best-effort stop
+                    # Keep the polling/interrupt failure as the original exception.
+                    print(
+                        f"WARN cancellation unconfirmed; query_id={query_id}",
+                        file=sys.stderr,
+                    )
             raise
 
     def object_bytes(self, uri, prefix):
@@ -295,17 +333,16 @@ def validate_deployment(deployment):
     account = deployment.get("account_id", "")
     require(re.fullmatch(r"[0-9]{12}", account), "invalid test account")
     require(
-        re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]", deployment.get("region", "")),
-        "invalid test region",
+        deployment.get("region") == "us-west-2",
+        "fixture region must be us-west-2",
     )
     bucket = deployment.get("bucket", "")
     require(
-        re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket) and "-tst-" in bucket,
+        bucket == f"ck-datalake-tst-ckdata-fixtures-{account}",
         "bucket is not in the test namespace",
     )
     require(
-        re.fullmatch(r"[a-z0-9_]+", deployment.get("database", ""))
-        and "_tst_" in deployment["database"],
+        deployment.get("database") == "ck_datalake_tst_ckdata_fixtures",
         "database is not in the test namespace",
     )
     require(
@@ -329,34 +366,25 @@ def validate_deployment(deployment):
         set(deployment.get("seats", {})) == {"internal", "research"},
         "both test seats are required",
     )
-    identities = set()
-    groups = set()
     for seat, config in deployment["seats"].items():
-        roles = [config.get("role_arn", "")]
-        if seat == "research":
-            roles.append(config.get("source_role_arn", ""))
-        else:
-            require(
-                config.get("source_role_arn") is None,
-                "internal test seat must be direct",
-            )
-        for arn in roles:
-            require(
-                re.fullmatch(role_pattern, arn)
-                and arn.split(":")[4] == account
-                and "-tst-" in arn.rsplit("/", 1)[-1],
-                "runtime role is outside the test account or namespace",
-            )
-            require(arn not in identities, "test identities must be distinct")
-            identities.add(arn)
-        group = config.get("workgroup", "")
         require(
-            re.fullmatch(r"[a-z0-9-]+", group)
-            and "-tst-" in group
-            and group not in groups,
-            "test workgroups must be distinct and named in the test namespace",
+            config.get("role_arn")
+            == f"arn:aws:iam::{account}:role/ck-datalake-tst-ckdata-{seat}-reader",
+            "unexpected synthetic reader role",
         )
-        groups.add(group)
+        expected_source = (
+            f"arn:aws:iam::{account}:role/ck-datalake-tst-ckdata-source"
+            if seat == "research"
+            else None
+        )
+        require(
+            config.get("source_role_arn") == expected_source,
+            "unexpected synthetic source role",
+        )
+        require(
+            config.get("workgroup") == f"ck-datalake-tst-ckdata-{seat}",
+            "unexpected synthetic workgroup",
+        )
         require(
             config.get("output_location") == f"s3://{bucket}/results/{seat}/",
             "unexpected test output prefix",
@@ -405,10 +433,10 @@ def expect_denied(operation, label):
 
 
 def run_live(deployment):
+    deployment = validate_deployment(deployment)
     import boto3
     from botocore.config import Config
 
-    deployment = validate_deployment(deployment)
     config = Config(
         connect_timeout=10,
         read_timeout=30,
@@ -526,7 +554,37 @@ def self_test():
             "arr": None,
         },
     ]
-    table = pa.Table.from_pylist(rows)
+    schema = pa.schema(
+        [
+            ("id", pa.int32()),
+            ("s_null", pa.string()),
+            ("s_empty", pa.string()),
+            ("big", pa.int64()),
+            ("dec", pa.decimal128(3, 2)),
+            ("ts", pa.timestamp("ms")),
+            ("arr", pa.list_(pa.int32())),
+        ]
+    )
+    table = pa.Table.from_pylist(rows, schema=schema)
+    # Athena INT96 commonly reads as ns; fixture files can retain ms or us.
+    # Every supported representation must preserve the same exact instant.
+    for unit in ("ms", "us", "ns"):
+        check_types(table.cast(schema.set(5, pa.field("ts", pa.timestamp(unit)))))
+    for name, changed_type in (
+        ("id", pa.int64()),
+        ("dec", pa.decimal128(3, 1)),
+        ("arr", pa.list_(pa.int64())),
+        ("ts", pa.timestamp("us", "UTC")),
+    ):
+        changed = table.cast(
+            schema.set(schema.get_field_index(name), pa.field(name, changed_type))
+        )
+        try:
+            check_types(changed)
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("schema drift was accepted")
     buffer = io.BytesIO()
     pq.write_table(table, buffer)
     check_types(pq.read_table(pa.BufferReader(buffer.getvalue())))
@@ -640,6 +698,58 @@ def self_test():
             require(len(fake.cancelled) == 1, "timeout did not cancel its query")
         else:
             raise RuntimeError("timeout was not reported")
+    for stop_fails in (False, True):
+        original = OSError("synthetic polling failure")
+        with (
+            patch.object(fake, "get_query_execution", side_effect=original),
+            patch.object(
+                fake,
+                "stop_query_execution",
+                side_effect=OSError("stop failed") if stop_fails else None,
+            ) as stop,
+        ):
+            try:
+                probe.execute(
+                    "UNLOAD (SELECT 1) TO 's3://synthetic/results/failure/' WITH (format='PARQUET')"
+                )
+            except OSError as error:
+                require(error is original, "cancellation masked the polling failure")
+                require(stop.call_count == 1, "polling failure did not stop the query")
+            else:
+                raise RuntimeError("polling error was not reported")
+    config = fake.get_work_group()["WorkGroup"]["Configuration"]
+    config["BytesScannedCutoffPerQuery"] = 10 * 1024 * 1024
+    config["ResultConfiguration"]["ExpectedBucketOwner"] = "000000000000"
+    for cutoff in (None, 10 * 1024 * 1024 + 1):
+        changed = dict(config, BytesScannedCutoffPerQuery=cutoff)
+        with patch.object(
+            fake,
+            "get_work_group",
+            return_value={"WorkGroup": {"Configuration": changed}},
+        ):
+            try:
+                Probe(
+                    fake,
+                    fake,
+                    "synthetic-workgroup",
+                    "000000000000",
+                    "s3://synthetic/results/",
+                )
+            except RuntimeError:
+                pass
+            else:
+                raise RuntimeError("workgroup scan drift was accepted")
+    with patch.object(
+        fake, "get_work_group", return_value={"WorkGroup": {"Configuration": config}}
+    ):
+        try:
+            Probe(
+                fake, fake, "synthetic-workgroup", "000000000000", "s3://other/results/"
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("workgroup output drift was accepted")
     expected = "arn:aws:iam::000000000000:role/reader"
     require(
         role_matches(
@@ -669,8 +779,8 @@ def self_test():
         "purpose": "ckdata-synthetic-tests",
         "account_id": "000000000000",
         "region": "us-west-2",
-        "bucket": "example-tst-fixtures",
-        "database": "example_tst_fixtures",
+        "bucket": "ck-datalake-tst-ckdata-fixtures-000000000000",
+        "database": "ck_datalake_tst_ckdata_fixtures",
         "table": "types",
         "fixture_keys": [
             "fixtures/types/part-1.parquet",
@@ -679,12 +789,12 @@ def self_test():
         "operator_role_arns": ["arn:aws:iam::000000000000:role/operator"],
         "seats": {
             seat: {
-                "role_arn": f"arn:aws:iam::000000000000:role/example-tst-{seat}-reader",
-                "source_role_arn": "arn:aws:iam::000000000000:role/example-tst-source"
+                "role_arn": f"arn:aws:iam::000000000000:role/ck-datalake-tst-ckdata-{seat}-reader",
+                "source_role_arn": "arn:aws:iam::000000000000:role/ck-datalake-tst-ckdata-source"
                 if seat == "research"
                 else None,
-                "workgroup": f"example-tst-{seat}",
-                "output_location": f"s3://example-tst-fixtures/results/{seat}/",
+                "workgroup": f"ck-datalake-tst-ckdata-{seat}",
+                "output_location": f"s3://ck-datalake-tst-ckdata-fixtures-000000000000/results/{seat}/",
             }
             for seat in ("internal", "research")
         },
@@ -693,8 +803,10 @@ def self_test():
     import copy
 
     for field, invalid in (
-        ("bucket", "production-fixtures"),
-        ("database", "research"),
+        ("bucket", "example-tst-fixtures"),
+        ("bucket", "ck-datalake-tst-ckdata-fixtures-111111111111"),
+        ("database", "example_tst_fixtures"),
+        ("region", "us-east-1"),
         ("table", "other"),
     ):
         changed = copy.deepcopy(sample)
@@ -705,9 +817,25 @@ def self_test():
             pass
         else:
             raise RuntimeError("non-test deployment was accepted")
+    admitted = copy.deepcopy(sample)
+    admitted["operator_role_arns"] = ["arn:aws:iam::111111111111:role/operator"]
+    validate_deployment(admitted)
+    for seat, field in (
+        ("internal", "workgroup"),
+        ("research", "role_arn"),
+        ("research", "source_role_arn"),
+    ):
+        changed = copy.deepcopy(sample)
+        changed["seats"][seat][field] += "-near-miss"
+        try:
+            validate_deployment(changed)
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("near-miss test namespace was accepted")
     changed = copy.deepcopy(sample)
     changed["seats"]["research"]["role_arn"] = (
-        "arn:aws:iam::111111111111:role/example-tst-reader"
+        "arn:aws:iam::111111111111:role/ck-datalake-tst-ckdata-reader"
     )
     try:
         validate_deployment(changed)
@@ -752,8 +880,9 @@ def main():
         args.run_live and args.deployment is not None,
         "live mode requires --run-live and --deployment",
     )
-    raw = args.deployment.read_bytes()
-    require(len(raw) <= 131072, "deployment contract is unexpectedly large")
+    with args.deployment.open("rb") as contract:
+        raw = contract.read(65536 + 1)
+    require(len(raw) <= 65536, "deployment contract is unexpectedly large")
     run_live(json.loads(raw))
 
 
@@ -763,16 +892,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("STOP interrupted", file=sys.stderr)
         sys.exit(130)
-    except (
-        RuntimeError,
-        TimeoutError,
-        BotoCoreError,
-        ClientError,
-        OSError,
-        ValueError,
-        KeyError,
-        TypeError,
-    ) as error:
+    except Exception as error:  # noqa: BLE001 -- CLI boundary logs only a code or safe local error
         sys.stdout.flush()
         code = getattr(error, "response", {}).get("Error", {}).get("Code")
         if code:
