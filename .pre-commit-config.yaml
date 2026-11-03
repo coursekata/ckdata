@@ -5,11 +5,15 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^(python/|r/inst/)(THIRD_PARTY_NOTICES\.txt|RUST_RUNTIME_NOTICES\.html)$|^scripts/licenses/upstream/
       - id: end-of-file-fixer
+        exclude: ^(python/|r/inst/)(THIRD_PARTY_NOTICES\.txt|RUST_RUNTIME_NOTICES\.html)$|^scripts/licenses/upstream/
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
+        # Generated legal texts are verified against the locked dependencies below.
+        exclude: ^(python/|r/inst/)(THIRD_PARTY_NOTICES\.txt|RUST_RUNTIME_NOTICES\.html)$
 
   # Stops a secret from ever entering the history; CI re-checks the full commit graph, because
   # this hook only sees the staged diff and yields to --no-verify.
@@ -22,7 +26,7 @@ repos:
         pass_filenames: false
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 44.199.0
+    rev: 44.206.2
     hooks:
       - id: renovate-config-validator
 
@@ -44,21 +48,31 @@ repos:
         name: rustfmt
         entry: sh -c 'cargo fmt --all --check && cargo fmt --all --check --manifest-path r/src/rust/Cargo.toml'
         language: system
-        types: [rust]
+        files: (^|/)(Cargo\.(toml|lock)|[^/]+\.rs)$
         pass_filenames: false
 
       - id: clippy
         name: clippy
         entry: cargo clippy --workspace --all-targets --locked -- -D warnings
         language: system
-        types: [rust]
+        files: (^|/)(Cargo\.(toml|lock)|[^/]+\.rs)$
         pass_filenames: false
+        always_run: true
         stages: [pre-push]
 
       - id: cargo-test
         name: cargo test
-        entry: cargo test --workspace --locked --exclude ckdata-py
+        entry: cargo test --workspace --all-targets --locked --exclude ckdata-py
         language: system
-        types: [rust]
+        files: (^|/)(Cargo\.(toml|lock)|[^/]+\.rs)$
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: license-notices
+        name: locked Cargo license notices
+        entry: python3 scripts/check-licenses.py
+        language: system
+        files: (^|/)(Cargo\.(toml|lock)|LICENSE)$|^scripts/(check-licenses\.py|licenses/)|^(python/|r/inst/)(THIRD_PARTY_NOTICES\.txt|RUST_RUNTIME_NOTICES\.html)$
         pass_filenames: false
         stages: [pre-push]

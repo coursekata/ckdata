@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "Query the CourseKata data lake. A pre-release that runs no query yet."
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.txt", "RUST_RUNTIME_NOTICES.html"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Programming Language :: Python :: 3",
