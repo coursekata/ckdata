@@ -31,6 +31,12 @@ pub enum SessionStatus {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallerIdentity {
+    pub account: String,
+    pub arn: String,
+}
+
 #[derive(Clone, Debug)]
 struct RoleLease {
     deadline: Instant,
@@ -106,6 +112,28 @@ impl Connection {
     /// can make authentication requests through the configured AWS providers.
     pub async fn connect(options: ConnectionOptions) -> Result<Self, Error> {
         Self::with_loader(options, aws_config::defaults(BehaviorVersion::latest())).await
+    }
+
+    /// Reuse an already-resolved AWS SDK configuration, including its credential
+    /// provider and client overrides. Resolve the profile in that configuration;
+    /// `options.profile` must be unset. An explicit region still overrides it.
+    /// The optional extra role retains the same fixed lifetime as `connect`.
+    pub async fn connect_with_config(
+        options: ConnectionOptions,
+        mut config: SdkConfig,
+    ) -> Result<Self, Error> {
+        if options.profile.is_some() {
+            return Err(Error::InvalidSetting(
+                "resolve the profile before passing an SDK configuration",
+            ));
+        }
+        if let Some(region) = &options.region {
+            config = config
+                .to_builder()
+                .region(Region::new(region.clone()))
+                .build();
+        }
+        Self::from_config(options, config).await
     }
 
     async fn with_loader(options: ConnectionOptions, loader: ConfigLoader) -> Result<Self, Error> {
@@ -193,6 +221,36 @@ impl Connection {
 
     pub fn options(&self) -> &ConnectionOptions {
         &self.options
+    }
+
+    /// Inspect the selected identity without submitting a data query. Credential
+    /// values are never returned. This is useful for acceptance-environment fences.
+    pub async fn caller_identity(&self) -> Result<CallerIdentity, Error> {
+        self.session_status()?;
+        let identity = aws_sdk_sts::Client::new(&self.config)
+            .get_caller_identity()
+            .send()
+            .await
+            .map_err(|error| Error::Service {
+                operation: "GetCallerIdentity",
+                code: error
+                    .as_service_error()
+                    .and_then(|service| service.code())
+                    .unwrap_or("request failed")
+                    .to_owned(),
+            })?;
+        let account = identity
+            .account()
+            .filter(|account| account.len() == 12 && account.bytes().all(|ch| ch.is_ascii_digit()))
+            .ok_or(Error::InvalidServiceResponse("GetCallerIdentity"))?;
+        let arn = identity
+            .arn()
+            .filter(|arn| !arn.is_empty())
+            .ok_or(Error::InvalidServiceResponse("GetCallerIdentity"))?;
+        Ok(CallerIdentity {
+            account: account.to_owned(),
+            arn: arn.to_owned(),
+        })
     }
 
     pub(crate) fn aws_config(&self) -> &SdkConfig {

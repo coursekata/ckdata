@@ -284,6 +284,7 @@ async fn deadline_stops_the_submitted_query_and_preserves_timeout_if_stop_fails(
         let options = QueryOptions {
             timeout: Duration::from_secs(2),
             poll_interval: Duration::from_secs(10),
+            ..QueryOptions::default()
         };
         let error = connection(http.clone())
             .await

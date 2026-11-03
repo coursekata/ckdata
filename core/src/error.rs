@@ -33,4 +33,9 @@ pub enum Error {
         reason: crate::QueryInterruption,
         cancellation: crate::CancellationStatus,
     },
+    #[error("Athena query {query_id} result: {reason}")]
+    Result {
+        query_id: String,
+        reason: crate::ResultError,
+    },
 }

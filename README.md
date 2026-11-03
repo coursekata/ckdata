@@ -1,12 +1,12 @@
 # ckdata
 
-ckdata is being rebuilt around a Rust core shared by its R and Python packages. This repository provides the build layout, CI checks and the core's connection, catalog and query lifecycle implementation. Reading query results into Arrow is in development.
+ckdata is being rebuilt around a Rust core shared by its R and Python packages. The core connects to Athena, reads Parquet results into Arrow and restores supported final ordering. The R and Python query bindings are still in development.
 
 ## Status
 
 This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
 
-The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Its low-level UNLOAD operation validates a single read-only query, uses workgroup output settings, polls completion and requests cancellation on interruption. Result decoding and the researcher-facing bindings remain in development. Tests use invented configuration and mocked HTTP services.
+The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Queries use UNLOAD with a fresh workgroup output prefix, bounded manifest/Parquet reads, typed empty results and cancellation. Supported outer `ORDER BY` keys are sorted across files; unsupported keys produce a warning. Tests use invented configuration and mocked HTTP services.
 
 ## Install
 
@@ -34,7 +34,15 @@ cd r && Rscript -e 'devtools::test()'
 
 `devtools::document()`, run from `r/`, regenerates the R wrappers after a change to the R crate's exported functions.
 
-The [query integration harness](scripts/query-integration/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. Its offline self-test runs in CI; live checks use restricted test roles and the deployment contract from ck-datalake's `environments/ckdata-test` root.
+The [query integration harness](scripts/query-integration/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. The Rust acceptance example runs the implemented reader through both test roles. Its help and ordinary Rust tests are offline; live checks require an explicit flag and the deployment contract from ck-datalake's `environments/ckdata-test` root.
+
+```sh
+cargo run -p ckdata --example query-acceptance -- --help
+cargo run -p ckdata --example query-acceptance -- \
+  --deployment /absolute/path/to/ckdata-test-deployment.json --run-live
+```
+
+AWS profiles and region follow standard SDK configuration; `--profile` selects a source profile. The core's `Connection::query` accepts SQL, `QueryOptions` and a `QueryCancellation` token, and returns owned Arrow batches through `QueryResult`. Signal cancellation and keep awaiting the query so the client can request a remote stop. The library installs no global Ctrl-C handler.
 
 ```sh
 uv venv --python 3.11 && source .venv/bin/activate

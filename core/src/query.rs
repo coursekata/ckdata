@@ -26,6 +26,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct QueryOptions {
     pub timeout: Duration,
     pub poll_interval: Duration,
+    pub result_limits: crate::ResultLimits,
 }
 
 impl Default for QueryOptions {
@@ -33,7 +34,21 @@ impl Default for QueryOptions {
         Self {
             timeout: Duration::from_secs(30 * 60),
             poll_interval: Duration::from_secs(1),
+            result_limits: crate::ResultLimits::default(),
         }
+    }
+}
+
+impl QueryOptions {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.timeout.is_zero()
+            || self.timeout > Duration::from_secs(86400)
+            || self.poll_interval.is_zero()
+            || self.poll_interval > Duration::from_secs(60)
+        {
+            return Err(Error::InvalidSetting("query timeout or poll interval"));
+        }
+        self.result_limits.validate()
     }
 }
 
@@ -93,14 +108,24 @@ impl Connection {
         cancellation: &QueryCancellation,
     ) -> Result<QueryExecution, Error> {
         let query = read_query(sql)?;
-        if options.timeout.is_zero()
-            || options.timeout > Duration::from_secs(24 * 60 * 60)
-            || options.poll_interval.is_zero()
-            || options.poll_interval > Duration::from_secs(60)
-        {
-            return Err(Error::InvalidSetting("query timeout or poll interval"));
-        }
-        let deadline = Instant::now() + options.timeout;
+        options.validate()?;
+        self.execute_sql_unload(
+            query.to_string(),
+            options,
+            cancellation,
+            Instant::now() + options.timeout,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_sql_unload(
+        &self,
+        query: String,
+        options: &QueryOptions,
+        cancellation: &QueryCancellation,
+        deadline: Instant,
+    ) -> Result<QueryExecution, Error> {
+        options.validate()?;
         let guard = RequestGuard {
             connection: self,
             cancellation,
@@ -171,6 +196,9 @@ impl Connection {
             "UNLOAD ({query}) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
             destination.data_prefix.replace('\'', "''")
         );
+        if unload.len() > 256 * 1024 {
+            return Err(Error::InvalidQuery("wrapped query exceeds 256 KiB"));
+        }
         guard.check().map_err(before_submission)?;
         // Do not race cancellation against StartQueryExecution: its response is
         // needed to stop a query accepted just before the interruption. The SDK
@@ -342,14 +370,14 @@ struct QueryDestination {
     configuration: ResultConfiguration,
 }
 
-struct RequestGuard<'a> {
-    connection: &'a Connection,
-    cancellation: &'a QueryCancellation,
-    deadline: Instant,
+pub(crate) struct RequestGuard<'a> {
+    pub(crate) connection: &'a Connection,
+    pub(crate) cancellation: &'a QueryCancellation,
+    pub(crate) deadline: Instant,
 }
 
 impl RequestGuard<'_> {
-    fn check(&self) -> Result<(), QueryInterruption> {
+    pub(crate) fn check(&self) -> Result<(), QueryInterruption> {
         if self.cancellation.is_cancelled() {
             return Err(QueryInterruption::Cancelled);
         }
@@ -362,7 +390,7 @@ impl RequestGuard<'_> {
             .map_err(|_| QueryInterruption::SessionExpired)
     }
 
-    async fn run<T>(
+    pub(crate) async fn run<T>(
         &self,
         request: impl Future<Output = Result<T, QueryInterruption>>,
     ) -> Result<T, QueryInterruption> {
@@ -405,7 +433,7 @@ impl From<QueryInterruption> for PollError {
     }
 }
 
-fn read_query(sql: &str) -> Result<Box<Query>, Error> {
+pub(crate) fn read_query(sql: &str) -> Result<Box<Query>, Error> {
     if sql.len() > 256 * 1024 {
         return Err(Error::InvalidQuery("query exceeds 256 KiB"));
     }
@@ -469,20 +497,7 @@ impl Visitor for ReadOnly {
 }
 
 fn s3_location(location: &str) -> bool {
-    let Some((bucket, key)) = location
-        .strip_prefix("s3://")
-        .and_then(|rest| rest.split_once('/'))
-    else {
-        return false;
-    };
-    (3..=63).contains(&bucket.len())
-        && bucket
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-".contains(&byte))
-        && !key
-            .chars()
-            .any(|ch| ch.is_control() || matches!(ch, '?' | '#' | '\\'))
-        && !key.split('/').any(|part| matches!(part, "." | ".."))
+    crate::location::S3Location::parse(location).is_some()
 }
 
 fn s3_prefix(location: &str) -> Option<String> {

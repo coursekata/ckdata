@@ -222,6 +222,40 @@ fn replay(status: u16, body: String) -> StaticReplayClient {
     )])
 }
 
+#[tokio::test]
+async fn custom_sdk_configuration_has_explicit_profile_and_region_semantics() {
+    let config = config(StaticReplayClient::new(vec![]));
+    let mut opts = options();
+    opts.region = Some("eu-central-1".into());
+    let connection = Connection::connect_with_config(opts, config.clone())
+        .await
+        .unwrap();
+    assert_eq!(connection.region(), "eu-central-1");
+    let mut opts = options();
+    opts.profile = Some("unresolved-profile".into());
+    assert!(matches!(
+        Connection::connect_with_config(opts, config).await,
+        Err(Error::InvalidSetting(_))
+    ));
+}
+
+#[tokio::test]
+async fn identity_check_returns_only_account_and_arn_without_a_data_query() {
+    let http = replay(200, r#"<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><GetCallerIdentityResult><Account>000000000000</Account><Arn>arn:aws:sts::000000000000:assumed-role/synthetic/session</Arn><UserId>synthetic</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>"#.into());
+    let connection = Connection::from_config(options(), config(http.clone()))
+        .await
+        .unwrap();
+    let identity = connection.caller_identity().await.unwrap();
+    assert_eq!(identity.account, "000000000000");
+    assert!(identity.arn.ends_with("/synthetic/session"));
+    let requests: Vec<_> = http
+        .actual_requests()
+        .map(|request| String::from_utf8(request.body().bytes().unwrap().to_vec()).unwrap())
+        .collect();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].contains("Action=GetCallerIdentity"));
+}
+
 #[tokio::test(start_paused = true)]
 async fn one_role_assumption_warns_at_fifteen_minutes_and_cannot_renew_at_expiry() {
     let http = replay(200, response("2024-01-01T01:00:00Z"));
