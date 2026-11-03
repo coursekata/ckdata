@@ -57,7 +57,11 @@ Controlled final acceptance uses `--workgroup`, `--schema`, `--expected-account`
 
 The core wraps the supplied SQL in UNLOAD after trimming whitespace and one trailing semicolon. Athena validates the SQL. File paths come from paginated `GetQueryResults` calls with `QueryResultType::DataManifest`; the upstream Parquet reader decodes the files into Arrow. The reader follows manifest entries only and checks server-side encryption. SSE-KMS accepts a full key ARN or standard key UUID; aliases are rejected before submission because object identity cannot be verified from them.
 
-An empty UNLOAD may produce no Parquet files. The result then has zero rows, `schema()` returns `None` and `into_reader()` returns `None`. If Athena writes a zero-row Parquet file, its schema and reader remain available. The core submits no extra SQL to recover a schema. All-NULL rows are ordinary result rows.
+An empty UNLOAD may produce no Parquet files. The core then runs one schema-only UNLOAD: an outer `LIMIT 0` suppresses the complete original query's rows, and a singleton outer join supplies typed NULLs for Parquet to describe. Only that schema is retained. Successful results always provide `schema()` and `into_reader()`, with zero public rows. A zero-row Parquet file needs no recovery, and actual all-NULL rows are retained.
+
+Recovery uses the same timeout, cancellation signal, role and output protections as the original query. Recovery errors retain both query IDs when available, and recovery never repeats recursively. Its schema belongs to the second execution: changing a table or view definition between executions can change the recovered schema.
+
+The Rust harness compares complete schemas for scalar and nested projections, including arrays, maps, structs, decimal precision, timestamp units and nullability. It covers filtering, `LIMIT 0`, CTE/OFFSET empties and real all-NULL nested rows. Offline tests also cover recovery failures, cancellation and the shared deadline. No query-result schema is inferred from API type names.
 
 UNLOAD writes multiple files in parallel and does not guarantee their combined row order, even when the query contains `ORDER BY`. The core returns the decoded rows without sorting them. Acceptance checks compare values without assuming cross-file order.
 
@@ -72,7 +76,7 @@ uv run --locked python -m scripts.query_probe --run-live \
 
 The contract supplies the region, account, exact role chain, workgroups, database and fixed table. There are no arbitrary SQL or production-role options. The harness rejects non-test namespaces before creating data clients, verifies the source and every assumed identity, then queries as each restricted test reader. Credentials remain in memory.
 
-For each seat it checks literal types, an empty query and the named invented Parquet fixture, including NULL, empty string, exact int64, decimal, timestamp and array values. Table/column discovery uses metadata APIs without submitting a query. It also requires denied access to the other test workgroup and to a known fixture object's source bytes. Manifest entries and downloads are confined to the generated output prefixes. Results must match the workgroup's encryption; only assertion outcomes, zero-row representation and safe failure identifiers are printed.
+For each seat it checks literal types, an empty query and the named invented Parquet fixture, including NULL, empty string, exact int64, decimal, timestamp and array values. This independent environment probe reports Athena's raw fileless-empty behavior; the Rust harness checks the core's schema recovery. Table/column discovery uses metadata APIs without submitting a query. It also requires denied access to the other test workgroup and to a known fixture object's source bytes. Manifest entries and downloads are confined to the generated output prefixes. Results must match the workgroup's encryption; only assertion outcomes, zero-row representation and safe failure identifiers are printed.
 
 Three UNLOAD queries run per seat. Athena writes fresh outputs under that seat's test prefix; the environment expires them after three days. The harness has no deletion or infrastructure permissions. Its zero-row query reports whether Athena wrote a manifest or Parquet files; a Parquet schema is available only when a file exists.
 
@@ -109,6 +113,6 @@ and scale, array element type, NULLs and timezone changes remain checked.
 
 Successful core queries include `SessionExpiring` in their warnings during the
 last fifteen minutes of an explicit role lease. Hosts must present those warnings;
-`into_reader_with_warnings()` returns the optional Arrow reader together with
+`into_reader_with_warnings()` returns the Arrow reader together with
 the warnings. Service errors retain modeled operational guidance. Raw responses, credential-provider details
 and signed authentication diagnostics are excluded.

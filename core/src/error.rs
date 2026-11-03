@@ -46,6 +46,12 @@ pub enum Error {
         query_id: String,
         reason: crate::ResultError,
     },
+    #[error("Athena query {query_id} empty-result schema recovery: {source}")]
+    SchemaRecovery {
+        query_id: String,
+        #[source]
+        source: Box<Error>,
+    },
 }
 
 /// Copy modeled service guidance, excluding authentication diagnostics that can

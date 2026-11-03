@@ -9,7 +9,8 @@ use arrow_array::types::{
     TimestampSecondType,
 };
 use arrow_array::{
-    Array, Decimal128Array, Int32Array, Int64Array, ListArray, PrimitiveArray, StringArray,
+    Array, Decimal128Array, Int32Array, Int64Array, ListArray, PrimitiveArray, RecordBatchReader,
+    StringArray,
 };
 use aws_config::BehaviorVersion;
 use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
@@ -23,6 +24,36 @@ use clap::Parser;
 use serde::Deserialize;
 
 const PROBE: &str = "SELECT * FROM (VALUES (1, CAST(NULL AS VARCHAR), '', BIGINT '9007199254740993', DECIMAL '1.10', TIMESTAMP '2026-10-16 12:34:56.789', ARRAY[1, 2]), (2, 'a', 'b', NULL, NULL, NULL, NULL)) AS t(id, s_null, s_empty, big, dec, ts, arr)";
+
+const SCALAR_PROBE: &str = r#"SELECT
+TRUE AS flag,
+CAST(7 AS TINYINT) AS tiny,
+CAST(32000 AS SMALLINT) AS small,
+42 AS integer_value,
+BIGINT '9007199254740993' AS big,
+REAL '1.25' AS single_value,
+DOUBLE '1.25' AS double_value,
+DECIMAL '1.10' AS decimal_small,
+CAST('12345678901234567890.123456789012345678' AS DECIMAL(38,18)) AS decimal_wide,
+CAST('invented' AS VARCHAR) AS text_value,
+CAST('xy' AS CHAR(5)) AS fixed_value,
+CAST('' AS VARCHAR) AS empty_text,
+CAST(NULL AS VARCHAR) AS null_text,
+X'00017FFF' AS bytes_value,
+DATE '2026-10-16' AS day_value,
+TIMESTAMP '2026-10-16 12:34:56.789' AS moment,
+TIMESTAMP '1960-01-02 03:04:05.678' AS before_epoch"#;
+
+const NESTED_PROBE: &str = r#"SELECT
+ARRAY[BIGINT '9007199254740993', CAST(NULL AS BIGINT), BIGINT '-4'] AS array_nullable,
+CAST(ARRAY[] AS ARRAY(INTEGER)) AS empty_array,
+ARRAY[CAST('1.123456789012345678' AS DECIMAL(38,18)), CAST(NULL AS DECIMAL(38,18))] AS decimal_array,
+MAP(ARRAY['a','b'], ARRAY[CAST('1.10' AS DECIMAL(38,18)), CAST(NULL AS DECIMAL(38,18))]) AS map_decimal,
+CAST(ROW(BIGINT '9007199254740993','invented',ARRAY[1,CAST(NULL AS INTEGER),2]) AS ROW(id BIGINT,label VARCHAR,items ARRAY(INTEGER))) AS named_record,
+CAST(ARRAY[ROW(BIGINT '3',ARRAY[1,CAST(NULL AS INTEGER)]),CAST(NULL AS ROW(id BIGINT,items ARRAY(INTEGER)))] AS ARRAY(ROW(id BIGINT,items ARRAY(INTEGER)))) AS record_array,
+CAST(MAP(ARRAY['a','b'],ARRAY[ARRAY[ROW(DECIMAL '1.10',TIMESTAMP '2026-10-16 12:34:56.789')],CAST(NULL AS ARRAY(ROW(amount DECIMAL(10,2),stamp TIMESTAMP)))]) AS MAP(VARCHAR,ARRAY(ROW(amount DECIMAL(10,2),stamp TIMESTAMP)))) AS map_records,
+CAST(ROW(ARRAY[ARRAY[1,CAST(NULL AS INTEGER)],CAST(NULL AS ARRAY(INTEGER)),CAST(ARRAY[] AS ARRAY(INTEGER))],MAP(ARRAY['a'],ARRAY[ARRAY[BIGINT '9007199254740993',CAST(NULL AS BIGINT)]])) AS ROW(matrix ARRAY(ARRAY(INTEGER)),lookup MAP(VARCHAR,ARRAY(BIGINT)))) AS deep_record,
+CAST(NULL AS ROW(id BIGINT,items ARRAY(INTEGER))) AS null_record"#;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -288,7 +319,7 @@ fn check_types(result: &QueryResult) -> Result<(), String> {
         result.row_count() == 2 && result.warnings().is_empty(),
         "literal count or session warning changed",
     )?;
-    let schema = result.schema().ok_or("nonempty result has no schema")?;
+    let schema = result.schema();
     check_probe_batches(&schema, result.batches())
 }
 
@@ -402,31 +433,22 @@ async fn checks(
     let result = run_query(connection, &sql).await?;
     check_types(&result)?;
     println!("PASS literal Arrow types and values");
-    let empty = run_query(
-        connection,
-        &format!("SELECT * FROM ({PROBE}) q WHERE FALSE ORDER BY id"),
-    )
-    .await?;
-    require(empty.row_count() == 0, "empty result returned rows")?;
-    if let Some(schema) = empty.schema() {
-        require(
-            Some(schema) == result.schema(),
-            "empty Parquet schema differs",
-        )?;
-        println!("PASS empty result: zero rows; Parquet schema matches");
-    } else {
-        require(
-            empty.batches().is_empty(),
-            "result without a schema contains batches",
-        )?;
-        println!("PASS empty result: no Parquet files; schema unavailable");
-    }
+    check_empty_result(
+        run_query(
+            connection,
+            &format!("SELECT * FROM ({PROBE}) q WHERE FALSE ORDER BY id"),
+        )
+        .await?,
+        &result.schema(),
+    )?;
+    println!("PASS empty result: zero rows and matching Parquet schema/reader");
     let all_null = run_query(connection, "SELECT CAST(NULL AS BIGINT) AS all_null").await?;
     require(
         all_null.row_count() == 1 && all_null.batches()[0].column(0).is_null(0),
         "all-NULL real row was discarded",
     )?;
     println!("PASS all-NULL real row retained");
+    check_extended_schemas(connection).await?;
     if let Some(table) = table {
         let metadata = connection
             .table_metadata(table)
@@ -446,6 +468,72 @@ async fn checks(
             check_types(&result)?;
             println!("PASS invented fixture table through Rust reader");
         }
+    }
+    Ok(())
+}
+
+fn check_empty_result(
+    result: QueryResult,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<(), String> {
+    require(result.row_count() == 0, "empty result returned rows")?;
+    require(
+        &result.schema() == expected,
+        "empty result's full Parquet schema differs",
+    )?;
+    let (reader, warnings) = result.into_reader_with_warnings();
+    require(
+        warnings.is_empty(),
+        "unexpected session warning during acceptance",
+    )?;
+    require(&reader.schema() == expected, "empty reader lost its schema")?;
+    for batch in reader {
+        require(
+            batch.map_err(|_| "cannot read empty result")?.num_rows() == 0,
+            "schema-recovery rows escaped into the result",
+        )?;
+    }
+    Ok(())
+}
+
+async fn check_extended_schemas(connection: &Connection) -> Result<(), String> {
+    for (label, sql, columns) in [("scalar", SCALAR_PROBE, 17), ("nested", NESTED_PROBE, 9)] {
+        let baseline = run_query(connection, sql).await?;
+        require(
+            baseline.row_count() == 1 && baseline.schema().fields().len() == columns,
+            "extended literal shape changed",
+        )?;
+        let schema = baseline.schema();
+        for empty_sql in [
+            format!("SELECT * FROM (\n{sql}\n) q WHERE FALSE"),
+            format!("{sql}\nLIMIT 0"),
+            format!("WITH invented AS (\n{sql}\n) SELECT * FROM invented OFFSET 1"),
+        ] {
+            check_empty_result(run_query(connection, &empty_sql).await?, &schema)?;
+        }
+        if label == "nested" {
+            // A real row with NULL nested parents must not be treated as a
+            // recovery placeholder. Selection keeps all nested types intact.
+            let all_null = run_query(connection, &format!(
+                "SELECT q.* FROM (VALUES (1)) seed(unused) LEFT JOIN (SELECT * FROM (\n{sql}\n) original LIMIT 0) q ON TRUE"
+            )).await?;
+            require(
+                all_null.row_count() == 1 && all_null.schema() == schema,
+                "all-NULL nested row or schema changed",
+            )?;
+            require(
+                all_null.batches().iter().all(|batch| {
+                    batch
+                        .columns()
+                        .iter()
+                        .all(|array| array.null_count() == batch.num_rows())
+                }),
+                "expected invented NULL nested parents",
+            )?;
+        }
+        println!(
+            "PASS {label}: full schema retained for filtering, LIMIT 0 and CTE/OFFSET empties"
+        );
     }
     Ok(())
 }

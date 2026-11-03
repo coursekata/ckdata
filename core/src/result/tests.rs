@@ -39,9 +39,45 @@ enum Mode {
     Headers,
     DuplicateFile,
     ManifestFailure,
+    MissingResultSet,
     InvalidParquet,
     Expiring,
     ExpiringNoFiles,
+    NestedNoFiles,
+    NoFilesAgain,
+    RecoveryRows,
+    RecoveryFailed,
+    RecoveryBadManifest,
+    RecoveryBadEncryption,
+    RecoveryMissingFile,
+    RecoveryInvalidParquet,
+    RecoveryMismatchedSchema,
+    CancelBeforeRecovery,
+    CancelDuringRecovery,
+    RecoverySlow,
+    QueryFailed,
+}
+
+impl Mode {
+    fn fileless(self) -> bool {
+        matches!(
+            self,
+            Self::NoFiles
+                | Self::ExpiringNoFiles
+                | Self::NestedNoFiles
+                | Self::NoFilesAgain
+                | Self::RecoveryRows
+                | Self::RecoveryFailed
+                | Self::RecoveryBadManifest
+                | Self::RecoveryBadEncryption
+                | Self::RecoveryMissingFile
+                | Self::RecoveryInvalidParquet
+                | Self::RecoveryMismatchedSchema
+                | Self::CancelBeforeRecovery
+                | Self::CancelDuringRecovery
+                | Self::RecoverySlow
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -66,6 +102,62 @@ struct State {
     prefix: String,
     files: Vec<Vec<u8>>,
     submitted_sql: String,
+    submissions: Vec<Value>,
+    polls: usize,
+}
+
+fn nested_batch() -> RecordBatch {
+    let details = DataType::Struct(
+        vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new(
+                "amounts",
+                DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::Decimal128(38, 18),
+                    true,
+                ))),
+                true,
+            ),
+        ]
+        .into(),
+    );
+    let mapping = DataType::Map(
+        Arc::new(Field::new(
+            "entries",
+            DataType::Struct(
+                vec![
+                    Field::new("key", DataType::Utf8, false),
+                    Field::new("value", details.clone(), true),
+                ]
+                .into(),
+            ),
+            false,
+        )),
+        false,
+    );
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("details", details, true),
+        Field::new("mapping", mapping, true),
+    ]));
+    let columns = schema
+        .fields()
+        .iter()
+        .map(|field| new_null_array(field.data_type(), 1))
+        .collect();
+    RecordBatch::try_new(schema, columns).unwrap()
+}
+
+fn nested_parquet() -> Vec<u8> {
+    use parquet::arrow::arrow_writer::ArrowWriterOptions;
+    let batch = nested_batch();
+    let mut bytes = Vec::new();
+    let options = ArrowWriterOptions::new().with_skip_arrow_metadata(true);
+    let mut writer =
+        ArrowWriter::try_new_with_options(&mut bytes, batch.schema(), options).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+    bytes
 }
 
 fn batch(part: usize, mode: Mode) -> RecordBatch {
@@ -203,6 +295,8 @@ async fn service_with_encryption(
                         serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
                     let sql = body["QueryString"].as_str().unwrap();
                     state.submitted_sql = sql.to_owned();
+                    state.submissions.push(body.clone());
+                    state.polls = 0;
                     state.prefix = sql
                         .split(" TO '")
                         .nth(1)
@@ -211,19 +305,50 @@ async fn service_with_encryption(
                         .next()
                         .unwrap()
                         .to_owned();
+                    let recovery = state.submissions.len() > 1;
                     state.files = vec![parquet(&batch(0, mode))];
                     if !matches!(mode, Mode::Empty | Mode::AllNull) {
                         state.files.push(parquet(&batch(1, mode)));
                     }
-                    if matches!(mode, Mode::InvalidParquet) {
+                    if recovery && !matches!(mode, Mode::RecoveryRows) {
+                        state.files = vec![parquet(&batch(0, Mode::AllNull).slice(0, 1))];
+                    }
+                    if recovery && matches!(mode, Mode::NestedNoFiles) {
+                        state.files = vec![nested_parquet()];
+                    }
+                    if recovery && matches!(mode, Mode::RecoveryMismatchedSchema) {
+                        state.files.push(parquet(&batch(1, Mode::MismatchedSchema)));
+                    }
+                    if matches!(mode, Mode::InvalidParquet)
+                        || (recovery && matches!(mode, Mode::RecoveryInvalidParquet))
+                    {
                         state.files = vec![b"not a parquet file".to_vec()];
                     }
-                    json!({"QueryExecutionId": "synthetic-query"})
+                    json!({"QueryExecutionId": if recovery { "synthetic-recovery" } else { "synthetic-query" }})
                 }
                 "GetQueryExecution" => {
+                    state.polls += 1;
+                    let recovery = state.submissions.len() > 1;
+                    let query_id = if recovery {
+                        "synthetic-recovery"
+                    } else {
+                        "synthetic-query"
+                    };
                     let mut actual = configuration;
                     actual["OutputLocation"] = json!(format!("{OUTPUT}synthetic-query.txt"));
-                    let mut value = json!({"QueryExecution": {"QueryExecutionId": "synthetic-query", "WorkGroup": "synthetic", "Status": {"State": "SUCCEEDED"}, "Statistics": {"DataManifestLocation": format!("{OUTPUT}synthetic-query-manifest.csv")}, "ResultConfiguration": actual}});
+                    let mut value = json!({"QueryExecution": {"QueryExecutionId": query_id, "WorkGroup": "synthetic", "Status": {"State": "SUCCEEDED"}, "Statistics": {"DataManifestLocation": format!("{OUTPUT}{query_id}-manifest.csv")}, "ResultConfiguration": actual}});
+                    if matches!(mode, Mode::QueryFailed)
+                        || (recovery && matches!(mode, Mode::RecoveryFailed))
+                    {
+                        value["QueryExecution"]["Status"] = json!({"State": "FAILED", "StateChangeReason": "synthetic failure detail"});
+                    }
+                    if matches!(mode, Mode::RecoverySlow) && state.polls == 1 {
+                        value["QueryExecution"]["Status"] = json!({"State": "RUNNING"});
+                    }
+                    if recovery && matches!(mode, Mode::CancelDuringRecovery) {
+                        value["QueryExecution"]["Status"] = json!({"State": "RUNNING"});
+                        token.as_ref().unwrap().cancel();
+                    }
                     if matches!(mode, Mode::NoManifest) {
                         value["QueryExecution"]["Statistics"] = json!({});
                     }
@@ -232,8 +357,23 @@ async fn service_with_encryption(
                 "GetQueryResults" => {
                     let body: Value =
                         serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
-                    assert_eq!(body["QueryExecutionId"], "synthetic-query");
+                    let recovery = state.submissions.len() > 1;
+                    assert_eq!(
+                        body["QueryExecutionId"],
+                        if recovery {
+                            "synthetic-recovery"
+                        } else {
+                            "synthetic-query"
+                        }
+                    );
                     assert_eq!(body["QueryResultType"], "DATA_MANIFEST");
+                    if matches!(mode, Mode::MissingResultSet) {
+                        return http::Response::builder()
+                            .status(200)
+                            .header("content-type", "application/x-amz-json-1.1")
+                            .body(b"{}".to_vec())
+                            .unwrap();
+                    }
                     if matches!(mode, Mode::ManifestFailure) {
                         return http::Response::builder()
                             .status(400)
@@ -241,7 +381,10 @@ async fn service_with_encryption(
                             .body(br#"{"__type":"InvalidRequestException","Message":"synthetic manifest detail"}"#.to_vec())
                             .unwrap();
                     }
-                    if matches!(mode, Mode::NoFiles | Mode::ExpiringNoFiles) {
+                    if matches!(mode, Mode::CancelBeforeRecovery) && !recovery {
+                        token.as_ref().unwrap().cancel();
+                    }
+                    if (mode.fileless() && !recovery) || matches!(mode, Mode::NoFilesAgain) {
                         json!({"ResultSet": {}})
                     } else {
                         let part = if body["NextToken"].as_str() == Some("second") {
@@ -253,7 +396,9 @@ async fn service_with_encryption(
                         if matches!(mode, Mode::Headers) {
                             rows.push(json!({"Data": [{"VarCharValue": "location"}]}));
                         }
-                        let uri = if matches!(mode, Mode::BadManifest) {
+                        let uri = if matches!(mode, Mode::BadManifest)
+                            || (recovery && matches!(mode, Mode::RecoveryBadManifest))
+                        {
                             "s3://other-synthetic/private/file".to_owned()
                         } else if matches!(mode, Mode::TraversalManifest) {
                             format!("{}../part.parquet", state.prefix)
@@ -278,6 +423,12 @@ async fn service_with_encryption(
                         response
                     }
                 }
+                "StopQueryExecution" => {
+                    let body: Value =
+                        serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
+                    assert_eq!(body["QueryExecutionId"], "synthetic-recovery");
+                    json!({})
+                }
                 _ => panic!("unexpected operation {target}"),
             };
             (200, body.to_string().into_bytes(), true)
@@ -292,7 +443,7 @@ async fn service_with_encryption(
             if let Some(token) = &token {
                 token.cancel();
             }
-            if matches!(mode, Mode::MissingFile) {
+            if matches!(mode, Mode::MissingFile | Mode::RecoveryMissingFile) {
                 (
                     404,
                     b"<Error><Code>NoSuchKey</Code><Message>synthetic detail</Message></Error>"
@@ -312,7 +463,7 @@ async fn service_with_encryption(
                 (
                     200,
                     state.files[part].clone(),
-                    !matches!(mode, Mode::BadEncryption),
+                    !matches!(mode, Mode::BadEncryption | Mode::RecoveryBadEncryption),
                 )
             }
         };
@@ -372,10 +523,7 @@ async fn successful_query_surfaces_expiry_and_reader_conversion_retains_warnings
         [QueryWarning::SessionExpiring { .. }]
     ));
     assert_eq!(
-        reader
-            .unwrap()
-            .map(|batch| batch.unwrap().num_rows())
-            .sum::<usize>(),
+        reader.map(|batch| batch.unwrap().num_rows()).sum::<usize>(),
         4
     );
 }
@@ -445,12 +593,8 @@ async fn public_query_preserves_values_without_rewriting_sql_or_sorting_rows() {
             true,
         ),
     ]);
-    assert_eq!(result.schema().unwrap().as_ref(), &expected_schema);
-    let batches: Vec<_> = result
-        .into_reader()
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
+    assert_eq!(result.schema().as_ref(), &expected_schema);
+    let batches: Vec<_> = result.into_reader().collect::<Result<_, _>>().unwrap();
     let batch = arrow_select::concat::concat_batches(&Arc::new(expected_schema), &batches).unwrap();
     let n = batch
         .column(1)
@@ -565,18 +709,24 @@ async fn public_query_preserves_values_without_rewriting_sql_or_sorting_rows() {
 }
 
 #[tokio::test]
-async fn empty_output_is_reported_without_manufacturing_rows_or_a_schema() {
-    for mode in [Mode::NoFiles, Mode::ExpiringNoFiles] {
+async fn fileless_empty_results_recover_schema_without_returning_probe_rows() {
+    for mode in [Mode::NoFiles, Mode::ExpiringNoFiles, Mode::RecoveryRows] {
         let (connection, state) = service(mode, None).await;
         let result = connection
             .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
             .await
             .unwrap();
         assert_eq!(result.row_count(), 0);
-        assert!(result.schema().is_none());
+        assert_eq!(result.query_id(), "synthetic-query");
+        assert_eq!(result.schema().fields().len(), 7);
+        assert!(matches!(
+            result.schema().field(6).data_type(),
+            DataType::List(_)
+        ));
         assert!(result.batches().is_empty());
         let (reader, warnings) = result.into_reader_with_warnings();
-        assert!(reader.is_none());
+        assert_eq!(reader.schema().fields().len(), 7);
+        assert_eq!(reader.count(), 0);
         if matches!(mode, Mode::ExpiringNoFiles) {
             assert!(matches!(
                 warnings.as_slice(),
@@ -590,38 +740,210 @@ async fn empty_output_is_reported_without_manufacturing_rows_or_a_schema() {
                 .iter()
                 .filter(|op| *op == "StartQueryExecution")
                 .count(),
-            1
+            2
         );
+        assert_ne!(
+            state.submissions[0]["ClientRequestToken"],
+            state.submissions[1]["ClientRequestToken"]
+        );
+        let original = state.submissions[0]["QueryString"].as_str().unwrap();
+        let recovery = state.submissions[1]["QueryString"].as_str().unwrap();
+        assert!(original.starts_with(&format!("UNLOAD (\n{SQL}\n)")));
+        assert!(recovery.contains(&format!("(\n{SQL}\n) AS original_rows LIMIT 0")));
+        assert!(recovery.contains("SELECT schema_rows.*"));
         assert!(
-            !state
+            state
                 .requests
                 .iter()
-                .any(|op| op.starts_with("GET ") || op.contains("List"))
+                .all(|op| !op.contains("List") && !op.contains("Delete"))
         );
     }
 }
 
 #[tokio::test]
+async fn recovery_reads_nested_schema_from_physical_parquet_without_arrow_metadata() {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    let expected = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(nested_parquet()))
+        .unwrap()
+        .schema()
+        .clone();
+    let (connection, _) = service(Mode::NestedNoFiles, None).await;
+    let result = connection
+        .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(result.schema(), expected);
+    assert_eq!(result.row_count(), 0);
+    assert!(matches!(
+        result.schema().field(0).data_type(),
+        DataType::Struct(_)
+    ));
+    assert!(matches!(
+        result.schema().field(1).data_type(),
+        DataType::Map(_, _)
+    ));
+    assert_eq!(result.into_reader().count(), 0);
+}
+
+#[tokio::test]
+async fn recovery_failures_retain_original_and_recovery_ids_without_recursing() {
+    for mode in [
+        Mode::NoFilesAgain,
+        Mode::RecoveryFailed,
+        Mode::RecoveryBadManifest,
+        Mode::RecoveryBadEncryption,
+        Mode::RecoveryMissingFile,
+        Mode::RecoveryInvalidParquet,
+        Mode::RecoveryMismatchedSchema,
+    ] {
+        let (connection, state) = service(mode, None).await;
+        let error = connection
+            .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("synthetic-query"));
+        assert!(error.to_string().contains("synthetic-recovery"));
+        let Error::SchemaRecovery { query_id, source } = error else {
+            panic!("missing recovery context")
+        };
+        assert_eq!(query_id, "synthetic-query");
+        match *source {
+            Error::QueryFailed { query_id, reason } => {
+                assert!(matches!(mode, Mode::RecoveryFailed));
+                assert_eq!(query_id, "synthetic-recovery");
+                assert_eq!(reason, "synthetic failure detail");
+            }
+            Error::Result { query_id, reason } => {
+                assert_eq!(query_id, "synthetic-recovery");
+                match mode {
+                    Mode::NoFilesAgain | Mode::RecoveryMismatchedSchema => {
+                        assert!(matches!(reason, ResultError::InvalidSchema(_)))
+                    }
+                    Mode::RecoveryBadManifest => {
+                        assert!(matches!(reason, ResultError::InvalidManifest(_)))
+                    }
+                    Mode::RecoveryBadEncryption => {
+                        assert_eq!(reason, ResultError::EncryptionMismatch)
+                    }
+                    Mode::RecoveryInvalidParquet => {
+                        assert!(matches!(reason, ResultError::InvalidParquet(_)))
+                    }
+                    Mode::RecoveryMissingFile => assert!(
+                        matches!(reason, ResultError::Interrupted(QueryInterruption::RequestFailed { ref code, .. }) if code == "NoSuchKey")
+                    ),
+                    _ => panic!("unexpected recovery error"),
+                }
+            }
+            other => panic!("unexpected recovery error: {other}"),
+        }
+        let state = state.lock().unwrap();
+        assert_eq!(state.submissions.len(), 2);
+        if matches!(mode, Mode::NoFilesAgain | Mode::RecoveryBadManifest) {
+            assert!(!state.requests.iter().any(|op| op.starts_with("GET ")));
+        }
+    }
+}
+
+#[tokio::test]
+async fn cancellation_after_empty_execution_prevents_recovery_submission() {
+    let token = QueryCancellation::new();
+    let (connection, state) = service(Mode::CancelBeforeRecovery, Some(token.clone())).await;
+    let error = connection
+        .query(SQL, &QueryOptions::default(), &token)
+        .await
+        .unwrap_err();
+    // Cancellation may be observed while the last manifest page is finishing
+    // or by the recovery's pre-submission guard; neither may start a query.
+    assert!(
+        matches!(
+            &error,
+            Error::Result {
+                reason: ResultError::Interrupted(QueryInterruption::Cancelled),
+                ..
+            }
+        ) || matches!(&error, Error::SchemaRecovery { source, .. } if matches!(source.as_ref(), Error::QueryInterrupted { query_id: None, reason: QueryInterruption::Cancelled, .. })),
+        "{error:?}"
+    );
+    let state = state.lock().unwrap();
+    assert_eq!(state.submissions.len(), 1);
+    assert!(!state.requests.iter().any(|op| op == "StopQueryExecution"));
+}
+
+#[tokio::test]
+async fn cancellation_stops_only_the_active_schema_recovery_execution() {
+    let token = QueryCancellation::new();
+    let (connection, state) = service(Mode::CancelDuringRecovery, Some(token.clone())).await;
+    let error = connection
+        .query(SQL, &QueryOptions::default(), &token)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::SchemaRecovery { source, .. } if matches!(*source, Error::QueryInterrupted { query_id: Some(ref id), reason: QueryInterruption::Cancelled, cancellation: crate::CancellationStatus::Requested } if id == "synthetic-recovery"))
+    );
+    let state = state.lock().unwrap();
+    assert_eq!(state.submissions.len(), 2);
+    assert_eq!(
+        state
+            .requests
+            .iter()
+            .filter(|op| *op == "StopQueryExecution")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn recovery_shares_the_original_deadline_instead_of_resetting_it() {
+    use std::time::Duration;
+    let (connection, state) = service(Mode::RecoverySlow, None).await;
+    let options = QueryOptions {
+        timeout: Duration::from_secs(2),
+        poll_interval: Duration::from_secs(1),
+    };
+    let start = Instant::now();
+    let error = connection
+        .query(SQL, &options, &QueryCancellation::new())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::SchemaRecovery { source, .. } if matches!(*source, Error::QueryInterrupted { query_id: Some(ref id), reason: QueryInterruption::TimedOut, cancellation: crate::CancellationStatus::Requested } if id == "synthetic-recovery"))
+    );
+    assert_eq!(Instant::now() - start, Duration::from_secs(2));
+    assert_eq!(state.lock().unwrap().submissions.len(), 2);
+}
+
+#[tokio::test]
+async fn failed_original_query_does_not_attempt_schema_recovery() {
+    let (connection, state) = service(Mode::QueryFailed, None).await;
+    let error = connection
+        .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::QueryFailed { .. }));
+    assert_eq!(state.lock().unwrap().submissions.len(), 1);
+}
+
+#[tokio::test]
 async fn real_empty_parquet_retains_schema_and_all_null_rows_survive() {
     for (mode, expected_rows) in [(Mode::Empty, 0), (Mode::AllNull, 2)] {
-        let (connection, _) = service(mode, None).await;
+        let (connection, state) = service(mode, None).await;
         let result = connection
             .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
             .await
             .unwrap();
         assert_eq!(result.row_count(), expected_rows);
-        let schema = result.schema().unwrap();
+        let schema = result.schema();
         assert_eq!(schema.fields().len(), 7);
         assert_eq!(schema.field(1).data_type(), &DataType::Int64);
         assert!(matches!(schema.field(6).data_type(), DataType::List(_)));
         assert_eq!(
             result
                 .into_reader()
-                .unwrap()
                 .map(|batch| batch.unwrap().num_rows())
                 .sum::<usize>(),
             expected_rows
         );
+        assert_eq!(state.lock().unwrap().submissions.len(), 1);
     }
 }
 
@@ -653,7 +975,7 @@ async fn timezone_metadata_is_preserved_by_the_parquet_reader() {
         .await
         .unwrap();
     assert_eq!(
-        result.schema().unwrap().field(4).data_type(),
+        result.schema().field(4).data_type(),
         &DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, Some("UTC".into()))
     );
 }
@@ -669,6 +991,7 @@ async fn invalid_results_fail_without_partial_data_and_retain_modeled_service_gu
         Mode::MismatchedSchema,
         Mode::DuplicateFile,
         Mode::ManifestFailure,
+        Mode::MissingResultSet,
         Mode::InvalidParquet,
     ] {
         let (connection, state) = service(mode, None).await;
@@ -677,6 +1000,7 @@ async fn invalid_results_fail_without_partial_data_and_retain_modeled_service_gu
             .await
             .unwrap_err();
         assert!(matches!(&error, Error::Result { .. }));
+        assert_eq!(state.lock().unwrap().submissions.len(), 1);
         if matches!(
             mode,
             Mode::BadManifest
@@ -819,7 +1143,7 @@ async fn manifest_api_remains_authoritative_when_statistics_omit_the_location() 
         .await
         .unwrap();
     assert_eq!(result.row_count(), 4);
-    assert!(result.schema().is_some());
+    assert_eq!(result.schema().fields().len(), 7);
     assert_eq!(
         state
             .lock()

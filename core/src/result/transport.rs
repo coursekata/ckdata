@@ -106,9 +106,9 @@ pub(super) async fn manifest(
                 message: crate::error::service_message(error.as_service_error()),
             })
         })?;
-        let Some(result_set) = page.result_set() else {
-            continue;
-        };
+        let result_set = page
+            .result_set()
+            .ok_or(ResultError::InvalidManifest("missing result set"))?;
         let header = result_set
             .result_set_metadata()
             .and_then(|metadata| metadata.column_info().first())

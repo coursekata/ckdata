@@ -11,10 +11,21 @@ pub(super) struct Decoded {
     pub(super) batches: Vec<RecordBatch>,
 }
 
-pub(super) fn decode(bytes: Bytes, guard: &RequestGuard<'_>) -> Result<Decoded, ResultError> {
+fn reader_builder(
+    bytes: Bytes,
+    guard: &RequestGuard<'_>,
+) -> Result<ParquetRecordBatchReaderBuilder<Bytes>, ResultError> {
     guard.check().map_err(ResultError::Interrupted)?;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(bytes)
-        .map_err(|_| ResultError::InvalidParquet("cannot read metadata"))?;
+    ParquetRecordBatchReaderBuilder::try_new(bytes)
+        .map_err(|_| ResultError::InvalidParquet("cannot read metadata"))
+}
+
+pub(super) fn schema(bytes: Bytes, guard: &RequestGuard<'_>) -> Result<SchemaRef, ResultError> {
+    Ok(reader_builder(bytes, guard)?.schema().clone())
+}
+
+pub(super) fn decode(bytes: Bytes, guard: &RequestGuard<'_>) -> Result<Decoded, ResultError> {
+    let builder = reader_builder(bytes, guard)?;
     let schema = builder.schema().clone();
     let reader = builder
         .build()

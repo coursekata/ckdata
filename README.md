@@ -51,9 +51,11 @@ cargo run -p ckdata --example query_acceptance -- \
 
 AWS profiles and region follow standard SDK configuration; `--profile` selects a source profile. The core's `Connection::query` accepts SQL, `QueryOptions` and a `QueryCancellation` token, and returns owned Arrow batches through `QueryResult`. Signal cancellation and keep awaiting the query so the client can request a remote stop. The library installs no global Ctrl-C handler.
 
-The core wraps your SQL in UNLOAD after trimming whitespace and one trailing semicolon. Athena validates the SQL. `QueryResult::schema()` returns `Option<SchemaRef>`. If Athena writes no Parquet files for an empty result, `row_count()` is zero, `schema()` returns `None` and `into_reader()` returns `None`. A zero-row Parquet file retains its schema as `Some` and yields a reader. The core submits no extra query to obtain an empty result's schema.
+The core wraps your SQL in UNLOAD after trimming whitespace and one trailing semicolon. Athena validates the SQL. Every successful `QueryResult` has a Parquet-derived `SchemaRef` and an Arrow reader, including empty results. If Athena writes no files, the core runs one schema-only UNLOAD, reads its Parquet schema and returns zero rows. Recovery shares the original timeout and cancellation signal; failures retain the original query ID and the recovery error. A zero-row Parquet file already has a schema and needs no recovery.
 
-`into_reader_with_warnings()` returns the optional reader together with the query warnings. Hosts must present `SessionExpiring` warnings during the last fifteen minutes of an explicit role lease.
+UNLOAD does not guarantee combined row order across files, even with `ORDER BY`. The core does not sort results; callers needing local order must sort after retrieval.
+
+`into_reader_with_warnings()` returns the reader together with the query warnings. Hosts must present `SessionExpiring` warnings during the last fifteen minutes of an explicit role lease.
 
 The repository has one Python development environment, declared in `pyproject.toml`
 and resolved in `uv.lock`. It covers tooling, the AWS probe and Python binding
