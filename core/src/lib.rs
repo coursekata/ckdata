@@ -4,12 +4,15 @@
 mod connection;
 mod error;
 mod metadata;
+mod query;
 mod settings;
 
 pub use connection::{Connection, SessionStatus};
 pub use error::Error;
 pub use metadata::{ColumnMetadata, TableMetadata, TablePage};
+pub use query::{CancellationStatus, QueryExecution, QueryInterruption, QueryOptions};
 pub use settings::ConnectionOptions;
+pub use tokio_util::sync::CancellationToken as QueryCancellation;
 
 use std::sync::Arc;
 

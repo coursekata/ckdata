@@ -113,7 +113,10 @@ impl Connection {
         Self::from_config(options, config).await
     }
 
-    async fn from_config(options: ConnectionOptions, mut config: SdkConfig) -> Result<Self, Error> {
+    pub(crate) async fn from_config(
+        options: ConnectionOptions,
+        mut config: SdkConfig,
+    ) -> Result<Self, Error> {
         options.validate()?;
         if config
             .region()

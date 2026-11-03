@@ -1,12 +1,12 @@
 # ckdata
 
-ckdata is being rebuilt around a Rust core shared by its R and Python packages. This repository currently provides the build layout, CI checks and a synthetic Arrow handoff; the query implementation is planned.
+ckdata is being rebuilt around a Rust core shared by its R and Python packages. This repository provides the build layout, CI checks and the core's connection, catalog and query lifecycle implementation. Reading query results into Arrow is in development.
 
 ## Status
 
 This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
 
-The Rust core now supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Query execution and the researcher-facing bindings remain in development. Tests use invented configuration and mocked HTTP services.
+The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Its low-level UNLOAD operation validates a single read-only query, uses workgroup output settings, polls completion and requests cancellation on interruption. Result decoding and the researcher-facing bindings remain in development. Tests use invented configuration and mocked HTTP services.
 
 ## Install
 

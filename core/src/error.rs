@@ -21,4 +21,16 @@ pub enum Error {
     },
     #[error("AWS {0} returned an incomplete response")]
     InvalidServiceResponse(&'static str),
+    #[error("unsupported SQL: {0}")]
+    InvalidQuery(&'static str),
+    #[error("Athena query submission failed ({code}); request token {request_token}")]
+    QuerySubmission { code: String, request_token: String },
+    #[error("Athena query {query_id} failed: {reason}")]
+    QueryFailed { query_id: String, reason: String },
+    #[error("Athena query {query_id:?} interrupted: {reason}; cancellation {cancellation}")]
+    QueryInterrupted {
+        query_id: Option<String>,
+        reason: crate::QueryInterruption,
+        cancellation: crate::CancellationStatus,
+    },
 }
