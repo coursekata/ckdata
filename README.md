@@ -1,12 +1,12 @@
 # ckdata
 
-ckdata is being rebuilt around a Rust core shared by its R and Python packages. The core connects to Athena, reads Parquet results into Arrow and restores supported final ordering. The R and Python query bindings are still in development.
+ckdata is being rebuilt around a Rust core shared by its R and Python packages. The core connects to Athena and reads Parquet results into Arrow. The R and Python query bindings are still in development.
 
 ## Status
 
 This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
 
-The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Queries use UNLOAD with a fresh workgroup output prefix, bounded manifest/Parquet reads, typed empty results and cancellation. Supported outer `ORDER BY` keys are sorted across files; unsupported keys produce a warning. Tests use invented configuration and mocked HTTP services.
+The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Queries use UNLOAD with a fresh workgroup output prefix and support cancellation. The core retrieves file paths through Athena's paginated manifest API and reads the files with the upstream Parquet reader. Athena writes UNLOAD files in parallel, so combined row order is not guaranteed, even with `ORDER BY`. Tests use invented configuration and mocked HTTP services.
 
 ## Install
 
@@ -50,6 +50,10 @@ cargo run -p ckdata --example query_acceptance -- \
 ```
 
 AWS profiles and region follow standard SDK configuration; `--profile` selects a source profile. The core's `Connection::query` accepts SQL, `QueryOptions` and a `QueryCancellation` token, and returns owned Arrow batches through `QueryResult`. Signal cancellation and keep awaiting the query so the client can request a remote stop. The library installs no global Ctrl-C handler.
+
+The core wraps your SQL in UNLOAD after trimming whitespace and one trailing semicolon. Athena validates the SQL. `QueryResult::schema()` returns `Option<SchemaRef>`. If Athena writes no Parquet files for an empty result, `row_count()` is zero, `schema()` returns `None` and `into_reader()` returns `None`. A zero-row Parquet file retains its schema as `Some` and yields a reader. The core submits no extra query to obtain an empty result's schema.
+
+`into_reader_with_warnings()` returns the optional reader together with the query warnings. Hosts must present `SessionExpiring` warnings during the last fifteen minutes of an explicit role lease.
 
 The repository has one Python development environment, declared in `pyproject.toml`
 and resolved in `uv.lock`. It covers tooling, the AWS probe and Python binding

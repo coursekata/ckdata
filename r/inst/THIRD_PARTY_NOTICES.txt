@@ -18,8 +18,8 @@ copyright/license preambles are also preserved. Identical texts share a SHA-256
 reference. Upstream snapshots supply files omitted from published crate archives.
 Refresh or verify with: python3 scripts/check_licenses.py [--write]
 
-Cargo.lock SHA-256: c74fa9dfd5dac47071145757a2b39c556b303df7b1acf54dec87cde507e1d04d
-Registry packages: 294
+Cargo.lock SHA-256: 6ee6e3ad36ebf04a03bf3d98730aa7a41f11631f34156fd1170fdc9f362604ff
+Registry packages: 283
 
 Inventory
 =========
@@ -93,48 +93,6 @@ Selected license obligations: MIT
     Text SHA-256: c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08
   LICENSE-MIT
     Text SHA-256: 6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6
-
-ar_archive_writer 0.5.3
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/rust-lang/ar_archive_writer
-Declared license: Apache-2.0 WITH LLVM-exception
-Selected license obligations: Apache-2.0 WITH LLVM-exception
-  LICENSE.txt
-    Text SHA-256: f72b120d1385408e9e380acc020756eb6ba1b461d66c328ea67327ba08d7dcfd
-  reference/Alignment.h (source preamble)
-    Text SHA-256: 9e4f2a3d9585f26b9e30c2ba03613763313a46675c16a9226246f0da0f999642
-  reference/Archive.h (source preamble)
-    Text SHA-256: a91729f22828657d7dfefd12f9788043032b9661b39d600dc536dd41632f8514
-  reference/ArchiveWriter.cpp (source preamble)
-    Text SHA-256: ecc916f1739682a408dc2e1fbadd58bc3d58d82ee378c9ed72faf5cee764be5a
-  reference/ArchiveWriter.h (source preamble)
-    Text SHA-256: ecc484d0639f54b6752613601ba2053eb5d3e8a6b2c9b46554ff785c06c587c4
-  reference/COFF.h (source preamble)
-    Text SHA-256: 9018fad05209a3ff6bec314c8c1c1c24dd996126dfd26b1e330ad690da42cfaa
-  reference/COFFImportFile.cpp (source preamble)
-    Text SHA-256: 9525181fbb9f727424363608429f6a506221ad8366b63b5784fe13f4a1bd0e49
-  reference/COFFImportFile.h (source preamble)
-    Text SHA-256: ddc90955b57193e26ce79a9c9b64db90c185360f5d1b11b15fd24e5027bc2b79
-  reference/Mangler.cpp (source preamble)
-    Text SHA-256: 9bfefd63ca6611b0a9188f89db0ce572b3a7454454218c64312901bac8a83e1d
-  reference/ManglerTest.cpp (source preamble)
-    Text SHA-256: 03fd35b1e6c5b47e7581d5ec13103ce813284f66abe57d2b8afc00c978024b20
-  reference/MathExtras.h (source preamble)
-    Text SHA-256: 2c980deb7de6509fc0e00331c0da8f89083014255725e05d2a3a94ddce784ef4
-  src/alignment.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
-  src/archive.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
-  src/coff.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
-  src/coff_import_file.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
-  src/mangler.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
-  src/math_extras.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
-  src/object_reader.rs (source preamble)
-    Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56
 
 arc-swap 1.9.3
 Source: registry+https://github.com/rust-lang/crates.io-index
@@ -468,30 +426,6 @@ Selected license obligations: Apache-2.0
   src/tests/mod.rs (source preamble)
     Text SHA-256: b223b9484ee51338dee1484c54f0dd0dfb61940c85328272f15c525ab85c20c6
   src/writer.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-
-arrow-ord 59.3.2
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/apache/arrow-rs
-Declared license: Apache-2.0
-Selected license obligations: Apache-2.0
-  LICENSE.txt
-    Text SHA-256: 03548525ec3706de58e48ef6e3c455582557a0ad3b54a2da9a3819add35dfb72
-  NOTICE.txt
-    Text SHA-256: e5b198d7f809311723889814d99a92f808c69e89a847efa7a7b65270f5fdeae6
-  src/cmp.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/comparison.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/lib.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ord.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/partition.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/rank.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/sort.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
 
 arrow-schema 59.3.2
@@ -6224,26 +6158,6 @@ Selected license obligations: MIT
   LICENSE-MIT
     Text SHA-256: d2e7ec5355c96eeade56b09187ceb48a6a30299da3ce7531a66d3d11405ab963
 
-csv 1.4.0
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/BurntSushi/rust-csv
-Declared license: Unlicense/MIT
-Selected license obligations: MIT
-  COPYING
-    Text SHA-256: 01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f
-  LICENSE-MIT
-    Text SHA-256: 0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f
-
-csv-core 0.1.13
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/BurntSushi/rust-csv
-Declared license: Unlicense/MIT
-Selected license obligations: MIT
-  COPYING
-    Text SHA-256: 01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f
-  LICENSE-MIT
-    Text SHA-256: 0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f
-
 ctutils 0.4.8
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/RustCrypto/utils
@@ -7232,16 +7146,6 @@ Selected license obligations: MIT
   src/lib.rs (source preamble)
     Text SHA-256: 84ff7c28d9c95012acb6be697e80602dcf2297f6542da3a0a5c7aebcdfd66512
 
-object 0.39.1
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/gimli-rs/object
-Declared license: Apache-2.0 OR MIT
-Selected license obligations: MIT
-  LICENSE-APACHE
-    Text SHA-256: a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
-  LICENSE-MIT
-    Text SHA-256: 0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6
-
 once_cell 1.21.4
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/matklad/once_cell
@@ -7874,16 +7778,6 @@ Selected license obligations: MIT
   LICENSE-MIT
     Text SHA-256: 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 
-psm 0.1.32
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/rust-lang/stacker/
-Declared license: MIT OR Apache-2.0
-Selected license obligations: MIT
-  LICENSE-APACHE
-    Text SHA-256: 965a63a81d9a2fbeb5f9096954dabb49690f9dffcdac9825f675b25c807252a2
-  LICENSE-MIT
-    Text SHA-256: 3e3714aa69bd874601741fd7d7ad5298740cece37778e279fc1ab4451c5a11af
-
 quote 1.0.47
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/dtolnay/quote
@@ -7919,22 +7813,6 @@ Selected license obligations: MIT
     Text SHA-256: 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a
   LICENSE-MIT
     Text SHA-256: 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
-
-recursive 0.1.1
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/orlp/recursive
-Declared license: MIT
-Selected license obligations: MIT
-  LICENSE
-    Text SHA-256: 8ac0507577075ab0bd2463346d7786f69b5340c9cfb914d2c51d4e513f9b7d66
-
-recursive-proc-macro-impl 0.1.1
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/orlp/recursive
-Declared license: MIT
-Selected license obligations: MIT
-  LICENSE
-    Text SHA-256: 8ac0507577075ab0bd2463346d7786f69b5340c9cfb914d2c51d4e513f9b7d66
 
 regex-lite 0.1.9
 Source: registry+https://github.com/rust-lang/crates.io-index
@@ -8702,108 +8580,6 @@ Selected license obligations: MIT
   src/barrier.rs (source preamble)
     Text SHA-256: 95ab6672135bb7e33c5125f938a4cf6af33d2777efa27faca8986de933ec8ba5
 
-sqlparser 0.63.0
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/apache/datafusion-sqlparser-rs
-Declared license: Apache-2.0
-Selected license obligations: Apache-2.0
-  LICENSE.TXT
-    Text SHA-256: a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
-  src/ast/data_type.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/dcl.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/ddl.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/dml.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/helpers/attached_token.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/helpers/key_value_options.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/helpers/mod.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/helpers/stmt_create_database.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/helpers/stmt_create_table.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/helpers/stmt_data_loading.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/mod.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/operator.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/query.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/spans.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/table_constraints.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/trigger.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/value.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/ast/visitor.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/ansi.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/bigquery.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/clickhouse.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/databricks.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/duckdb.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/generic.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/hive.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/mod.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/mssql.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/mysql.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/oracle.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/postgresql.rs (source preamble)
-    Text SHA-256: 25ca52b2a8a8b22598c1e667c3139391807ddd0cdce556b255502678a42093fd
-  src/dialect/redshift.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/snowflake.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/spark.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/sqlite.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/dialect/teradata.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/display_utils.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/keywords.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/lib.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/test_utils.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/tokenizer.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-
-sqlparser_derive 0.6.0
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/sqlparser-rs/sqlparser-rs
-Declared license: Apache-2.0
-Selected license obligations: Apache-2.0
-  LICENSE.TXT
-    Text SHA-256: a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
-  src/dialect.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/lib.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  src/visit.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-
 stable_deref_trait 1.2.1
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/storyyeller/stable_deref_trait
@@ -8815,16 +8591,6 @@ Selected license obligations: MIT
     Text SHA-256: 5e05b024f653a5ce199e77cbbbd42fb5553562ec714b819421ed0c3e552a75d7
   src/lib.rs (source preamble)
     Text SHA-256: 4df3850ed3f5a0d11b598b593a46e72a1c71f34576fee080305ef7514dce23bb
-
-stacker 0.1.25
-Source: registry+https://github.com/rust-lang/crates.io-index
-Repository: https://github.com/rust-lang/stacker
-Declared license: MIT OR Apache-2.0
-Selected license obligations: MIT
-  LICENSE-APACHE
-    Text SHA-256: a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
-  LICENSE-MIT
-    Text SHA-256: 378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397
 
 strsim 0.11.1
 Source: registry+https://github.com/rust-lang/crates.io-index
@@ -10685,16 +10451,6 @@ text is in arrow-array/LICENSE-MIT.
 // ----------------------------------------------------------------------------
 
 
---- Text SHA-256: 03fd35b1e6c5b47e7581d5ec13103ce813284f66abe57d2b8afc00c978024b20 ---
-//===- llvm/unittest/IR/ManglerTest.cpp - Mangler unit tests --------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
-
 --- Text SHA-256: 0440d0f7b242642636ff3ec9d23f26ecc973a4af652bb5e83e06390118d243b9 ---
 // Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com) All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
@@ -11912,34 +11668,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
---- Text SHA-256: 0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6 ---
-Copyright (c) 2015 The Gimli Developers
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
 
 
 --- Text SHA-256: 0b7ff9c2bb1717b8a2fbe2ad8ff6bd0f30dfe670c16e02499898ca98d8d8cfd7 ---
@@ -15402,37 +15130,6 @@ SOFTWARE.
 // except according to those terms.
 
 
---- Text SHA-256: 25ca52b2a8a8b22598c1e667c3139391807ddd0cdce556b255502678a42093fd ---
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-
 --- Text SHA-256: 25d15c8ddbc2cacf2173624339933b2200afbdab566939afb2ec97f757a45a8d ---
 /* Copyright (c) The mldsa-native project authors
  * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT
@@ -16949,20 +16646,6 @@ DEALINGS IN THE SOFTWARE.
 --- Text SHA-256: 2c3657a13ccc3d449d9eafd6a1269381c52ac5ab06b2c0252894ec662b0862a3 ---
 /* crc_fast library C/C++ API - Copyright 2025 Don MacAskill */
 /* This header is auto-generated. Do not edit directly. */
-
-
---- Text SHA-256: 2c980deb7de6509fc0e00331c0da8f89083014255725e05d2a3a94ddce784ef4 ---
-//===-- llvm/Support/MathExtras.h - Useful math functions -------*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// This file contains some functions that are useful for math stuff.
-//
-//===----------------------------------------------------------------------===//
 
 
 --- Text SHA-256: 2d01890414494742ba4a509fcec8efa40f6d8be22cbd72be7cff08d6fda4ec89 ---
@@ -19046,25 +18729,6 @@ THE SOFTWARE.
 //
 // Standard ARM ABI: X0 = p3, X1 = p1
 // ----------------------------------------------------------------------------
-
-
---- Text SHA-256: 3e3714aa69bd874601741fd7d7ad5298740cece37778e279fc1ab4451c5a11af ---
-Copyright © 2018, Simonas Kazlauskas
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-associated documentation files (the "Software"), to deal in the Software without restriction,
-including without limitation the rights to use, copy, modify, merge, publish, distribute,
-sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or
-substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
-OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 --- Text SHA-256: 3e4f65d4f02427ad638abc0d42ddd74f313b3646302133d18e97159ab78e6d1c ---
@@ -29105,26 +28769,6 @@ DEALINGS IN THE SOFTWARE.
 // ----------------------------------------------------------------------------
 
 
---- Text SHA-256: 8ac0507577075ab0bd2463346d7786f69b5340c9cfb914d2c51d4e513f9b7d66 ---
-Copyright 2024, Orson R. L. Peters
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the “Software”), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 --- Text SHA-256: 8ae1cc2f114af360087787675a6463766ab8a27453caf5f257147246088be95a ---
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR ISC
@@ -30014,29 +29658,6 @@ DEALINGS IN THE SOFTWARE.
 //
 // Standard ARM ABI: X0 = z, X1 = c, X2 = x
 // ----------------------------------------------------------------------------
-
-
---- Text SHA-256: 9018fad05209a3ff6bec314c8c1c1c24dd996126dfd26b1e330ad690da42cfaa ---
-//===-- llvm/BinaryFormat/COFF.h --------------------------------*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// This file contains an definitions used in Windows COFF Files.
-//
-// Structures and enums defined within this file where created using
-// information from Microsoft's publicly available PE/COFF format document:
-//
-// Microsoft Portable Executable and Common Object File Format Specification
-// Revision 8.1 - February 15, 2008
-//
-// As of 5/2/2010, hosted by Microsoft at:
-// http://www.microsoft.com/whdc/system/platform/firmware/pecoff.mspx
-//
-//===----------------------------------------------------------------------===//
 
 
 --- Text SHA-256: 901ceddbd2aef755f41bd82c512e3cf9382d912a70342f77eff003df2dec67b5 ---
@@ -30987,20 +30608,6 @@ limitations under the License.
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
---- Text SHA-256: 9525181fbb9f727424363608429f6a506221ad8366b63b5784fe13f4a1bd0e49 ---
-//===- COFFImportFile.cpp - COFF short import file implementation ---------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// This file defines the writeImportLibrary function.
-//
-//===----------------------------------------------------------------------===//
-
-
 --- Text SHA-256: 955220f07ea717027b394dd1cfb4e1fe6d0ac9fa7c6a43d1801fc0eee7d87767 ---
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
@@ -31151,210 +30758,6 @@ limitations under the License.
 // support (see RFC 4279) to OpenSSL.
 //
 // SPDX-License-Identifier: Apache-2.0
-
-
---- Text SHA-256: 965a63a81d9a2fbeb5f9096954dabb49690f9dffcdac9825f675b25c807252a2 ---
-                             Apache License
-                       Version 2.0, January 2004
-                    http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-  "License" shall mean the terms and conditions for use, reproduction,
-  and distribution as defined by Sections 1 through 9 of this document.
-
-  "Licensor" shall mean the copyright owner or entity authorized by
-  the copyright owner that is granting the License.
-
-  "Legal Entity" shall mean the union of the acting entity and all
-  other entities that control, are controlled by, or are under common
-  control with that entity. For the purposes of this definition,
-  "control" means (i) the power, direct or indirect, to cause the
-  direction or management of such entity, whether by contract or
-  otherwise, or (ii) ownership of fifty percent (50%) or more of the
-  outstanding shares, or (iii) beneficial ownership of such entity.
-
-  "You" (or "Your") shall mean an individual or Legal Entity
-  exercising permissions granted by this License.
-
-  "Source" form shall mean the preferred form for making modifications,
-  including but not limited to software source code, documentation
-  source, and configuration files.
-
-  "Object" form shall mean any form resulting from mechanical
-  transformation or translation of a Source form, including but
-  not limited to compiled object code, generated documentation,
-  and conversions to other media types.
-
-  "Work" shall mean the work of authorship, whether in Source or
-  Object form, made available under the License, as indicated by a
-  copyright notice that is included in or attached to the work
-  (an example is provided in the Appendix below).
-
-  "Derivative Works" shall mean any work, whether in Source or Object
-  form, that is based on (or derived from) the Work and for which the
-  editorial revisions, annotations, elaborations, or other modifications
-  represent, as a whole, an original work of authorship. For the purposes
-  of this License, Derivative Works shall not include works that remain
-  separable from, or merely link (or bind by name) to the interfaces of,
-  the Work and Derivative Works thereof.
-
-  "Contribution" shall mean any work of authorship, including
-  the original version of the Work and any modifications or additions
-  to that Work or Derivative Works thereof, that is intentionally
-  submitted to Licensor for inclusion in the Work by the copyright owner
-  or by an individual or Legal Entity authorized to submit on behalf of
-  the copyright owner. For the purposes of this definition, "submitted"
-  means any form of electronic, verbal, or written communication sent
-  to the Licensor or its representatives, including but not limited to
-  communication on electronic mailing lists, source code control systems,
-  and issue tracking systems that are managed by, or on behalf of, the
-  Licensor for the purpose of discussing and improving the Work, but
-  excluding communication that is conspicuously marked or otherwise
-  designated in writing by the copyright owner as "Not a Contribution."
-
-  "Contributor" shall mean Licensor and any individual or Legal Entity
-  on behalf of whom a Contribution has been received by Licensor and
-  subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of
-  this License, each Contributor hereby grants to You a perpetual,
-  worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-  copyright license to reproduce, prepare Derivative Works of,
-  publicly display, publicly perform, sublicense, and distribute the
-  Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of
-  this License, each Contributor hereby grants to You a perpetual,
-  worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-  (except as stated in this section) patent license to make, have made,
-  use, offer to sell, sell, import, and otherwise transfer the Work,
-  where such license applies only to those patent claims licensable
-  by such Contributor that are necessarily infringed by their
-  Contribution(s) alone or by combination of their Contribution(s)
-  with the Work to which such Contribution(s) was submitted. If You
-  institute patent litigation against any entity (including a
-  cross-claim or counterclaim in a lawsuit) alleging that the Work
-  or a Contribution incorporated within the Work constitutes direct
-  or contributory patent infringement, then any patent licenses
-  granted to You under this License for that Work shall terminate
-  as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the
-  Work or Derivative Works thereof in any medium, with or without
-  modifications, and in Source or Object form, provided that You
-  meet the following conditions:
-
-  (a) You must give any other recipients of the Work or
-      Derivative Works a copy of this License; and
-
-  (b) You must cause any modified files to carry prominent notices
-      stating that You changed the files; and
-
-  (c) You must retain, in the Source form of any Derivative Works
-      that You distribute, all copyright, patent, trademark, and
-      attribution notices from the Source form of the Work,
-      excluding those notices that do not pertain to any part of
-      the Derivative Works; and
-
-  (d) If the Work includes a "NOTICE" text file as part of its
-      distribution, then any Derivative Works that You distribute must
-      include a readable copy of the attribution notices contained
-      within such NOTICE file, excluding those notices that do not
-      pertain to any part of the Derivative Works, in at least one
-      of the following places: within a NOTICE text file distributed
-      as part of the Derivative Works; within the Source form or
-      documentation, if provided along with the Derivative Works; or,
-      within a display generated by the Derivative Works, if and
-      wherever such third-party notices normally appear. The contents
-      of the NOTICE file are for informational purposes only and
-      do not modify the License. You may add Your own attribution
-      notices within Derivative Works that You distribute, alongside
-      or as an addendum to the NOTICE text from the Work, provided
-      that such additional attribution notices cannot be construed
-      as modifying the License.
-
-  You may add Your own copyright statement to Your modifications and
-  may provide additional or different license terms and conditions
-  for use, reproduction, or distribution of Your modifications, or
-  for any such Derivative Works as a whole, provided Your use,
-  reproduction, and distribution of the Work otherwise complies with
-  the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise,
-  any Contribution intentionally submitted for inclusion in the Work
-  by You to the Licensor shall be under the terms and conditions of
-  this License, without any additional terms or conditions.
-  Notwithstanding the above, nothing herein shall supersede or modify
-  the terms of any separate license agreement you may have executed
-  with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade
-  names, trademarks, service marks, or product names of the Licensor,
-  except as required for reasonable and customary use in describing the
-  origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or
-  agreed to in writing, Licensor provides the Work (and each
-  Contributor provides its Contributions) on an "AS IS" BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-  implied, including, without limitation, any warranties or conditions
-  of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-  PARTICULAR PURPOSE. You are solely responsible for determining the
-  appropriateness of using or redistributing the Work and assume any
-  risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory,
-  whether in tort (including negligence), contract, or otherwise,
-  unless required by applicable law (such as deliberate and grossly
-  negligent acts) or agreed to in writing, shall any Contributor be
-  liable to You for damages, including any direct, indirect, special,
-  incidental, or consequential damages of any character arising as a
-  result of this License or out of the use or inability to use the
-  Work (including but not limited to damages for loss of goodwill,
-  work stoppage, computer failure or malfunction, or any and all
-  other commercial damages or losses), even if such Contributor
-  has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing
-  the Work or Derivative Works thereof, You may choose to offer,
-  and charge a fee for, acceptance of support, warranty, indemnity,
-  or other liability obligations and/or rights consistent with this
-  License. However, in accepting such obligations, You may act only
-  on Your own behalf and on Your sole responsibility, not on behalf
-  of any other Contributor, and only if You agree to indemnify,
-  defend, and hold each Contributor harmless for any liability
-  incurred by, or claims asserted against, such Contributor by reason
-  of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-  To apply the Apache License to your work, attach the following
-  boilerplate notice, with the fields enclosed by brackets "[]"
-  replaced with your own identifying information. (Don't include
-  the brackets!)  The text should be enclosed in the appropriate
-  comment syntax for the file format. We also recommend that a
-  file or class name and description of purpose be included on the
-  same "printed page" as the copyright notice for easier
-  identification within third-party archives.
-
-Copyright [yyyy] [name of copyright owner]
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 
 
 --- Text SHA-256: 9665d06521aff8e9ac5e919ca7d754c8b92d8305753bf40c252fd05053f11874 ---
@@ -32310,20 +31713,6 @@ This crate provides one cargo feature:
 // ----------------------------------------------------------------------------
 
 
---- Text SHA-256: 9bfefd63ca6611b0a9188f89db0ce572b3a7454454218c64312901bac8a83e1d ---
-//===-- Mangler.cpp - Self-contained c/asm llvm name mangler --------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// Unified name mangler for assembly backends.
-//
-//===----------------------------------------------------------------------===//
-
-
 --- Text SHA-256: 9c6cd54848d0c327955468d5adb5939113fbb8f8beb9f41fe8c4505fa1956c26 ---
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
@@ -32621,13 +32010,6 @@ This crate provides one cargo feature:
 // SPDX-License-Identifier: Apache-2.0 OR ISC
 
 
---- Text SHA-256: 9de5e3063b525f8cd68ebbeedaff0096a16bda31b952480152a95240c00ddf56 ---
-// Derived from code in LLVM, which is:
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
-
 --- Text SHA-256: 9df82c7741824cb3b3bb1905b7586cacc49eadfd8bdc8d886cd94ec937250d37 ---
 /*
  * Copyright (c) The mlkem-native project authors
@@ -32708,28 +32090,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-
-
---- Text SHA-256: 9e4f2a3d9585f26b9e30c2ba03613763313a46675c16a9226246f0da0f999642 ---
-//===-- llvm/Support/Alignment.h - Useful alignment functions ---*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// This file contains types to represent alignments.
-// They are instrumented to guarantee some invariants are preserved and prevent
-// invalid manipulations.
-//
-// - Align represents an alignment in bytes, it is always set and always a valid
-// power of two, its minimum value is 1 which means no alignment requirements.
-//
-// - MaybeAlign is an optional type, it may be undefined or set. When it's set
-// you can get the underlying Align type by using the value() method.
-//
-//===----------------------------------------------------------------------===//
 
 
 --- Text SHA-256: 9e752188d388918985f0d152d553c7d237d858a9dc2e51b97cb1b20e6c15ec7a ---
@@ -34779,20 +34139,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
-
---- Text SHA-256: a91729f22828657d7dfefd12f9788043032b9661b39d600dc536dd41632f8514 ---
-//===- Archive.h - ar archive file format -----------------------*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// This file declares the ar archive file format class.
-//
-//===----------------------------------------------------------------------===//
 
 
 --- Text SHA-256: a91c3862f1518d5bd2fe7c1e00741b02c02bb564b30b85cc944cb46b3624d111 ---
@@ -42390,23 +41736,6 @@ DEALINGS IN THE SOFTWARE.
 // ----------------------------------------------------------------------------
 
 
---- Text SHA-256: ddc90955b57193e26ce79a9c9b64db90c185360f5d1b11b15fd24e5027bc2b79 ---
-//===- COFFImportFile.h - COFF short import file implementation -*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// COFF short import file is a special kind of file which contains
-// only symbol names for DLL-exported symbols. This class implements
-// exporting of Symbols to create libraries and a SymbolicFile
-// interface for the file type.
-//
-//===----------------------------------------------------------------------===//
-
-
 --- Text SHA-256: dddf789f6928faa768b66a964dcda7b53403e10c15a81ef2ba677882b576bee4 ---
 /*
  * Copyright (c) The mlkem-native project authors
@@ -43713,34 +43042,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 
---- Text SHA-256: ecc484d0639f54b6752613601ba2053eb5d3e8a6b2c9b46554ff785c06c587c4 ---
-//===- ArchiveWriter.h - ar archive file format writer ----------*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// Declares the writeArchive function for writing an archive file.
-//
-//===----------------------------------------------------------------------===//
-
-
---- Text SHA-256: ecc916f1739682a408dc2e1fbadd58bc3d58d82ee378c9ed72faf5cee764be5a ---
-//===- ArchiveWriter.cpp - ar File Format implementation --------*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
-// This file defines the writeArchive function.
-//
-//===----------------------------------------------------------------------===//
-
-
 --- Text SHA-256: ed4d8461e2a0f4e00867e78681f7bef82976fed1b2b36859b5f2fd50d07a0bc1 ---
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
@@ -45045,228 +44346,6 @@ SOFTWARE.
 --- Text SHA-256: f7010c1d16918707dcb3dbed5b9b3b51fdccbc9e640a576c94661053e830e603 ---
 // Copyright (c) 2021, Google Inc.
 // SPDX-License-Identifier: ISC
-
-
---- Text SHA-256: f72b120d1385408e9e380acc020756eb6ba1b461d66c328ea67327ba08d7dcfd ---
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
-
-    TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-    1. Definitions.
-
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
-
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
-
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
-
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
-
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
-
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
-
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
-
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
-
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
-
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
-
-    2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
-
-    3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
-
-    4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
-
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
-
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
-
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
-
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
-
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
-
-    5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
-
-    6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
-
-    7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
-
-    8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
-
-    9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
-
-    END OF TERMS AND CONDITIONS
-
-    APPENDIX: How to apply the Apache License to your work.
-
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
-
-    Copyright [yyyy] [name of copyright owner]
-
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
-
-
---- LLVM Exceptions to the Apache 2.0 License ----
-
-As an exception, if, as a result of your compiling your source code, portions
-of this Software are embedded into an Object form of such source code, you
-may redistribute such embedded portions in such Object form without complying
-with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
-
-In addition, if you combine or link compiled forms of this Software with
-software that is licensed under the GPLv2 ("Combined Software") and if a
-court of competent jurisdiction determines that the patent provision (Section
-3), the indemnity provision (Section 9) or other Section of the License
-conflicts with the conditions of the GPLv2, you may retroactively and
-prospectively choose to deem waived or otherwise exclude such Section(s) of
-the License, but only in their entirety and only with respect to the Combined
-Software.
-
 
 
 --- Text SHA-256: f73dd6279e021e192884d43109d745d0559c6c00220ca124ba5e9e656e109e8b ---

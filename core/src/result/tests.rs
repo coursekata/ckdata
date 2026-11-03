@@ -1,10 +1,10 @@
 use super::*;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use arrow_array::types::{Int64Type, TimestampMillisecondType};
 use arrow_array::{
-    Array, ArrayRef, BooleanArray, Decimal128Array, Int64Array, ListArray, PrimitiveArray,
-    StringArray, new_null_array,
+    Array, ArrayRef, Decimal128Array, Int64Array, ListArray, PrimitiveArray, StringArray,
+    new_null_array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use aws_config::{BehaviorVersion, retry::RetryConfig};
@@ -28,14 +28,20 @@ enum Mode {
     Empty,
     AllNull,
     BadManifest,
+    TraversalManifest,
+    EncodedTraversalManifest,
     BadEncryption,
     MissingFile,
     MismatchedSchema,
     Timezone,
-    BadPresence,
     NoFiles,
-    CompactRows,
+    NoManifest,
+    Headers,
+    DuplicateFile,
+    ManifestFailure,
+    InvalidParquet,
     Expiring,
+    ExpiringNoFiles,
 }
 
 #[derive(Clone, Copy)]
@@ -59,22 +65,10 @@ struct State {
     requests: Vec<String>,
     prefix: String,
     files: Vec<Vec<u8>>,
+    submitted_sql: String,
 }
 
-fn batch(marker: &str, part: usize, mode: Mode) -> RecordBatch {
-    if matches!(mode, Mode::CompactRows) {
-        return RecordBatch::try_from_iter(vec![
-            (
-                "label",
-                Arc::new(StringArray::from(vec!["repeated"; 128])) as ArrayRef,
-            ),
-            (
-                marker,
-                Arc::new(BooleanArray::from(vec![true; 128])) as ArrayRef,
-            ),
-        ])
-        .unwrap();
-    }
+fn batch(part: usize, mode: Mode) -> RecordBatch {
     let timestamp = if matches!(mode, Mode::Timezone) {
         DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, Some("UTC".into()))
     } else {
@@ -94,22 +88,14 @@ fn batch(marker: &str, part: usize, mode: Mode) -> RecordBatch {
         Field::new("ts", timestamp.clone(), true),
         Field::new("dec", DataType::Decimal128(10, 2), true),
         Field::new("arr", nested, true),
-        Field::new(marker, DataType::Boolean, true),
     ]));
     if matches!(mode, Mode::Empty | Mode::AllNull) {
-        let rows = if matches!(mode, Mode::Empty) { 1 } else { 2 };
-        let mut columns: Vec<_> = schema.fields()[..7]
+        let rows = if matches!(mode, Mode::Empty) { 0 } else { 2 };
+        let columns = schema
+            .fields()
             .iter()
             .map(|field| new_null_array(field.data_type(), rows))
             .collect();
-        columns.push(Arc::new(BooleanArray::from(vec![
-            if matches!(mode, Mode::Empty) {
-                None
-            } else {
-                Some(true)
-            };
-            rows
-        ])));
         return RecordBatch::try_new(schema, columns).unwrap();
     }
     let labels = if part == 0 {
@@ -149,10 +135,6 @@ fn batch(marker: &str, part: usize, mode: Mode) -> RecordBatch {
                 Some(vec![Some(1), None]),
                 None,
             ])),
-            Arc::new(BooleanArray::from(vec![
-                Some(!matches!(mode, Mode::BadPresence)),
-                Some(true),
-            ])),
         ],
     )
     .unwrap()
@@ -184,7 +166,7 @@ async fn service_with_encryption(
         let mut state = observed.lock().unwrap();
         if request.method() == http::Method::POST && request.headers().get("x-amz-target").is_none()
         {
-            assert!(matches!(mode, Mode::Expiring));
+            assert!(matches!(mode, Mode::Expiring | Mode::ExpiringNoFiles));
             state.requests.push("AssumeRole".into());
             let response = r#"<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASSUMED_TEST</AccessKeyId><SecretAccessKey>synthetic</SecretAccessKey><SessionToken>synthetic</SessionToken><Expiration>2024-01-01T00:10:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>"#;
             return http::Response::builder()
@@ -220,16 +202,7 @@ async fn service_with_encryption(
                     let body: Value =
                         serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
                     let sql = body["QueryString"].as_str().unwrap();
-                    assert!(sql.contains("LEFT JOIN") && sql.contains("ckdata_rows.*"));
-                    let marker = format!(
-                        "__ckdata_presence_{}",
-                        sql.split("__ckdata_presence_")
-                            .nth(1)
-                            .unwrap()
-                            .chars()
-                            .take(32)
-                            .collect::<String>()
-                    );
+                    state.submitted_sql = sql.to_owned();
                     state.prefix = sql
                         .split(" TO '")
                         .nth(1)
@@ -238,16 +211,72 @@ async fn service_with_encryption(
                         .next()
                         .unwrap()
                         .to_owned();
-                    state.files = vec![parquet(&batch(&marker, 0, mode))];
-                    if !matches!(mode, Mode::Empty | Mode::AllNull | Mode::CompactRows) {
-                        state.files.push(parquet(&batch(&marker, 1, mode)));
+                    state.files = vec![parquet(&batch(0, mode))];
+                    if !matches!(mode, Mode::Empty | Mode::AllNull) {
+                        state.files.push(parquet(&batch(1, mode)));
+                    }
+                    if matches!(mode, Mode::InvalidParquet) {
+                        state.files = vec![b"not a parquet file".to_vec()];
                     }
                     json!({"QueryExecutionId": "synthetic-query"})
                 }
                 "GetQueryExecution" => {
                     let mut actual = configuration;
                     actual["OutputLocation"] = json!(format!("{OUTPUT}synthetic-query.txt"));
-                    json!({"QueryExecution": {"QueryExecutionId": "synthetic-query", "WorkGroup": "synthetic", "Status": {"State": "SUCCEEDED"}, "Statistics": {"DataManifestLocation": format!("{OUTPUT}synthetic-query-manifest.csv")}, "ResultConfiguration": actual}})
+                    let mut value = json!({"QueryExecution": {"QueryExecutionId": "synthetic-query", "WorkGroup": "synthetic", "Status": {"State": "SUCCEEDED"}, "Statistics": {"DataManifestLocation": format!("{OUTPUT}synthetic-query-manifest.csv")}, "ResultConfiguration": actual}});
+                    if matches!(mode, Mode::NoManifest) {
+                        value["QueryExecution"]["Statistics"] = json!({});
+                    }
+                    value
+                }
+                "GetQueryResults" => {
+                    let body: Value =
+                        serde_json::from_slice(request.body().bytes().unwrap()).unwrap();
+                    assert_eq!(body["QueryExecutionId"], "synthetic-query");
+                    assert_eq!(body["QueryResultType"], "DATA_MANIFEST");
+                    if matches!(mode, Mode::ManifestFailure) {
+                        return http::Response::builder()
+                            .status(400)
+                            .header("content-type", "application/x-amz-json-1.1")
+                            .body(br#"{"__type":"InvalidRequestException","Message":"synthetic manifest detail"}"#.to_vec())
+                            .unwrap();
+                    }
+                    if matches!(mode, Mode::NoFiles | Mode::ExpiringNoFiles) {
+                        json!({"ResultSet": {}})
+                    } else {
+                        let part = if body["NextToken"].as_str() == Some("second") {
+                            1
+                        } else {
+                            0
+                        };
+                        let mut rows = Vec::new();
+                        if matches!(mode, Mode::Headers) {
+                            rows.push(json!({"Data": [{"VarCharValue": "location"}]}));
+                        }
+                        let uri = if matches!(mode, Mode::BadManifest) {
+                            "s3://other-synthetic/private/file".to_owned()
+                        } else if matches!(mode, Mode::TraversalManifest) {
+                            format!("{}../part.parquet", state.prefix)
+                        } else if matches!(mode, Mode::EncodedTraversalManifest) {
+                            format!("{}%2e%2e/part.parquet", state.prefix)
+                        } else {
+                            let file = if matches!(mode, Mode::DuplicateFile) {
+                                0
+                            } else {
+                                part
+                            };
+                            format!("{}part-{file}.parquet", state.prefix)
+                        };
+                        rows.push(json!({"Data": [{"VarCharValue": uri}]}));
+                        let mut response = json!({"ResultSet": {
+                            "ResultSetMetadata": {"ColumnInfo": [{"Name": "location", "Type": "varchar"}]},
+                            "Rows": rows
+                        }});
+                        if state.files.len() > 1 && part == 0 {
+                            response["NextToken"] = json!("second");
+                        }
+                        response
+                    }
                 }
                 _ => panic!("unexpected operation {target}"),
             };
@@ -263,22 +292,7 @@ async fn service_with_encryption(
             if let Some(token) = &token {
                 token.cancel();
             }
-            if path.ends_with("-manifest.csv") {
-                let bytes = if matches!(mode, Mode::BadManifest) {
-                    "s3://other-synthetic/private/file\n".to_owned()
-                } else if matches!(mode, Mode::NoFiles) {
-                    String::new()
-                } else {
-                    (0..state.files.len())
-                        .map(|index| format!("{}part-{index}.parquet\n", state.prefix))
-                        .collect::<String>()
-                };
-                (
-                    200,
-                    bytes.into_bytes(),
-                    !matches!(mode, Mode::BadEncryption),
-                )
-            } else if matches!(mode, Mode::MissingFile) {
+            if matches!(mode, Mode::MissingFile) {
                 (
                     404,
                     b"<Error><Code>NoSuchKey</Code><Message>synthetic detail</Message></Error>"
@@ -295,7 +309,11 @@ async fn service_with_encryption(
                     .unwrap()
                     .parse()
                     .unwrap();
-                (200, state.files[part].clone(), true)
+                (
+                    200,
+                    state.files[part].clone(),
+                    !matches!(mode, Mode::BadEncryption),
+                )
             }
         };
         let mut response = http::Response::builder()
@@ -331,7 +349,7 @@ async fn service_with_encryption(
         .http_client(http)
         .build();
     let mut options = ConnectionOptions::new("synthetic", "schema");
-    if matches!(mode, Mode::Expiring) {
+    if matches!(mode, Mode::Expiring | Mode::ExpiringNoFiles) {
         options.role_arn = Some("arn:aws:iam::000000000000:role/synthetic".into());
     }
     let connection = Connection::from_config(options, config).await.unwrap();
@@ -354,7 +372,10 @@ async fn successful_query_surfaces_expiry_and_reader_conversion_retains_warnings
         [QueryWarning::SessionExpiring { .. }]
     ));
     assert_eq!(
-        reader.map(|batch| batch.unwrap().num_rows()).sum::<usize>(),
+        reader
+            .unwrap()
+            .map(|batch| batch.unwrap().num_rows())
+            .sum::<usize>(),
         4
     );
 }
@@ -375,7 +396,7 @@ async fn worker_wait_obeys_deadline_and_cancellation_while_worker_is_pending() {
         Ok::<_, ResultError>(())
     });
     assert!(matches!(
-        wait_for_worker(&guard, task, "test").await,
+        wait_for_worker(&guard, task).await,
         Err(ResultError::Interrupted(QueryInterruption::TimedOut))
     ));
     assert_eq!(Instant::now() - start, Duration::from_secs(2));
@@ -388,7 +409,7 @@ async fn worker_wait_obeys_deadline_and_cancellation_while_worker_is_pending() {
         tokio::time::sleep(Duration::from_secs(10)).await;
         Ok::<_, ResultError>(())
     });
-    let (result, ()) = tokio::join!(wait_for_worker(&guard, task, "test"), async {
+    let (result, ()) = tokio::join!(wait_for_worker(&guard, task), async {
         tokio::time::sleep(Duration::from_secs(1)).await;
         token.cancel();
     });
@@ -399,7 +420,7 @@ async fn worker_wait_obeys_deadline_and_cancellation_while_worker_is_pending() {
 }
 
 #[tokio::test]
-async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files() {
+async fn public_query_preserves_values_without_rewriting_sql_or_sorting_rows() {
     let (connection, state) = service(Mode::Rows, None).await;
     let result = connection
         .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
@@ -424,8 +445,12 @@ async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files()
             true,
         ),
     ]);
-    assert_eq!(result.schema().as_ref(), &expected_schema);
-    let batches: Vec<_> = result.into_reader().collect::<Result<_, _>>().unwrap();
+    assert_eq!(result.schema().unwrap().as_ref(), &expected_schema);
+    let batches: Vec<_> = result
+        .into_reader()
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
     let batch = arrow_select::concat::concat_batches(&Arc::new(expected_schema), &batches).unwrap();
     let n = batch
         .column(1)
@@ -434,7 +459,7 @@ async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files()
         .unwrap();
     assert_eq!(
         n.iter().collect::<Vec<_>>(),
-        vec![Some(3), Some(1), Some(9_007_199_254_740_993), Some(9)]
+        vec![Some(9_007_199_254_740_993), Some(9), Some(3), Some(1)]
     );
     let labels = batch
         .column(0)
@@ -443,7 +468,7 @@ async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files()
         .unwrap();
     assert_eq!(
         labels.iter().collect::<Vec<_>>(),
-        vec![Some("a"), Some("a"), Some("b"), None]
+        vec![Some("b"), None, Some("a"), Some("a")]
     );
     let nulls = batch
         .column(2)
@@ -509,12 +534,27 @@ async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files()
     );
     let state = state.lock().unwrap();
     assert_eq!(
+        state.submitted_sql,
+        format!(
+            "UNLOAD (\n{SQL}\n) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
+            state.prefix
+        )
+    );
+    assert_eq!(
+        state
+            .requests
+            .iter()
+            .filter(|op| *op == "GetQueryResults")
+            .count(),
+        2
+    );
+    assert_eq!(
         state
             .requests
             .iter()
             .filter(|op| op.starts_with("GET "))
             .count(),
-        3
+        2
     );
     assert!(
         state
@@ -525,7 +565,44 @@ async fn public_query_preserves_arrow_values_and_globally_sorts_multiple_files()
 }
 
 #[tokio::test]
-async fn empty_result_retains_nested_schema_and_all_null_real_rows_survive() {
+async fn empty_output_is_reported_without_manufacturing_rows_or_a_schema() {
+    for mode in [Mode::NoFiles, Mode::ExpiringNoFiles] {
+        let (connection, state) = service(mode, None).await;
+        let result = connection
+            .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(result.row_count(), 0);
+        assert!(result.schema().is_none());
+        assert!(result.batches().is_empty());
+        let (reader, warnings) = result.into_reader_with_warnings();
+        assert!(reader.is_none());
+        if matches!(mode, Mode::ExpiringNoFiles) {
+            assert!(matches!(
+                warnings.as_slice(),
+                [QueryWarning::SessionExpiring { .. }]
+            ));
+        }
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state
+                .requests
+                .iter()
+                .filter(|op| *op == "StartQueryExecution")
+                .count(),
+            1
+        );
+        assert!(
+            !state
+                .requests
+                .iter()
+                .any(|op| op.starts_with("GET ") || op.contains("List"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn real_empty_parquet_retains_schema_and_all_null_rows_survive() {
     for (mode, expected_rows) in [(Mode::Empty, 0), (Mode::AllNull, 2)] {
         let (connection, _) = service(mode, None).await;
         let result = connection
@@ -533,38 +610,89 @@ async fn empty_result_retains_nested_schema_and_all_null_real_rows_survive() {
             .await
             .unwrap();
         assert_eq!(result.row_count(), expected_rows);
-        assert_eq!(result.schema().field(1).data_type(), &DataType::Int64);
-        assert!(matches!(
-            result.schema().field(6).data_type(),
-            DataType::List(_)
-        ));
-        assert!(
-            !result
-                .schema()
-                .fields()
-                .iter()
-                .any(|field| field.name().starts_with("__ckdata_presence_"))
+        let schema = result.schema().unwrap();
+        assert_eq!(schema.fields().len(), 7);
+        assert_eq!(schema.field(1).data_type(), &DataType::Int64);
+        assert!(matches!(schema.field(6).data_type(), DataType::List(_)));
+        assert_eq!(
+            result
+                .into_reader()
+                .unwrap()
+                .map(|batch| batch.unwrap().num_rows())
+                .sum::<usize>(),
+            expected_rows
         );
     }
+}
+
+#[tokio::test]
+async fn manifest_headers_are_optional_and_pagination_keeps_every_file() {
+    let (connection, state) = service(Mode::Headers, None).await;
+    let result = connection
+        .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(result.row_count(), 4);
+    assert_eq!(
+        state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .filter(|op| *op == "GetQueryResults")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn timezone_metadata_is_preserved_by_the_parquet_reader() {
+    let (connection, _) = service(Mode::Timezone, None).await;
+    let result = connection
+        .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        result.schema().unwrap().field(4).data_type(),
+        &DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, Some("UTC".into()))
+    );
 }
 
 #[tokio::test]
 async fn invalid_results_fail_without_partial_data_and_retain_modeled_service_guidance() {
     for mode in [
         Mode::BadManifest,
+        Mode::TraversalManifest,
+        Mode::EncodedTraversalManifest,
         Mode::BadEncryption,
         Mode::MissingFile,
         Mode::MismatchedSchema,
-        Mode::Timezone,
-        Mode::BadPresence,
-        Mode::NoFiles,
+        Mode::DuplicateFile,
+        Mode::ManifestFailure,
+        Mode::InvalidParquet,
     ] {
-        let (connection, _) = service(mode, None).await;
+        let (connection, state) = service(mode, None).await;
         let error = connection
             .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
             .await
             .unwrap_err();
         assert!(matches!(&error, Error::Result { .. }));
+        if matches!(
+            mode,
+            Mode::BadManifest
+                | Mode::TraversalManifest
+                | Mode::EncodedTraversalManifest
+                | Mode::DuplicateFile
+        ) {
+            assert!(
+                !state
+                    .lock()
+                    .unwrap()
+                    .requests
+                    .iter()
+                    .any(|op| op.starts_with("GET "))
+            );
+        }
         if matches!(mode, Mode::MissingFile) {
             assert!(
                 matches!(&error, Error::Result { reason: ResultError::Interrupted(QueryInterruption::RequestFailed { code, message, .. }), .. } if code == "NoSuchKey" && message.as_deref() == Some("synthetic detail"))
@@ -572,66 +700,6 @@ async fn invalid_results_fail_without_partial_data_and_retain_modeled_service_gu
             assert!(error.to_string().contains("synthetic detail"));
         }
     }
-}
-
-#[tokio::test]
-async fn result_limits_reject_oversized_reads_and_validate_before_network() {
-    for limits in [
-        ResultLimits {
-            max_files: 1,
-            ..ResultLimits::default()
-        },
-        ResultLimits {
-            max_manifest_bytes: 8,
-            ..ResultLimits::default()
-        },
-        ResultLimits {
-            max_file_bytes: 8,
-            ..ResultLimits::default()
-        },
-        ResultLimits {
-            max_download_bytes: 8,
-            ..ResultLimits::default()
-        },
-        ResultLimits {
-            max_decoded_bytes: 8,
-            ..ResultLimits::default()
-        },
-        ResultLimits {
-            max_rows: 2,
-            ..ResultLimits::default()
-        },
-    ] {
-        let (connection, _) = service(Mode::Rows, None).await;
-        let options = QueryOptions {
-            result_limits: limits,
-            ..QueryOptions::default()
-        };
-        assert!(matches!(
-            connection
-                .query(SQL, &options, &QueryCancellation::new())
-                .await,
-            Err(Error::Result {
-                reason: ResultError::LimitExceeded(_),
-                ..
-            })
-        ));
-    }
-    let (connection, state) = service(Mode::Rows, None).await;
-    let options = QueryOptions {
-        result_limits: ResultLimits {
-            download_concurrency: 0,
-            ..ResultLimits::default()
-        },
-        ..QueryOptions::default()
-    };
-    assert!(matches!(
-        connection
-            .query(SQL, &options, &QueryCancellation::new())
-            .await,
-        Err(Error::InvalidSetting(_))
-    ));
-    assert!(state.lock().unwrap().requests.is_empty());
 }
 
 #[tokio::test]
@@ -659,28 +727,10 @@ async fn cancellation_during_result_transfer_is_typed_and_does_not_stop_complete
     );
 }
 
-#[tokio::test]
-async fn hidden_order_key_returns_an_explicit_warning() {
-    let (connection, _) = service(Mode::Rows, None).await;
-    let result = connection
-        .query(
-            "SELECT * FROM synthetic ORDER BY hidden",
-            &QueryOptions::default(),
-            &QueryCancellation::new(),
-        )
-        .await
-        .unwrap();
-    assert!(matches!(
-        result.warnings(),
-        [QueryWarning::OrderNotRestored { .. }]
-    ));
-    assert_eq!(result.row_count(), 4);
-}
-
 #[test]
 fn parquet_result_fixtures_use_snappy() {
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-    let bytes = parquet(&batch("synthetic_presence", 0, Mode::Rows));
+    let bytes = parquet(&batch(0, Mode::Rows));
     let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes)).unwrap();
     assert!(
         reader
@@ -690,85 +740,6 @@ fn parquet_result_fixtures_use_snappy() {
             .flat_map(|group| group.columns())
             .all(|column| column.compression() == Compression::SNAPPY)
     );
-}
-
-#[tokio::test]
-async fn public_query_restores_explicit_and_default_null_placement_across_files() {
-    for (order, expected) in [
-        (
-            "ASC NULLS FIRST",
-            vec![
-                (None, 9),
-                (Some("a"), 3),
-                (Some("a"), 1),
-                (Some("b"), 9_007_199_254_740_993),
-            ],
-        ),
-        (
-            "DESC NULLS FIRST",
-            vec![
-                (None, 9),
-                (Some("b"), 9_007_199_254_740_993),
-                (Some("a"), 3),
-                (Some("a"), 1),
-            ],
-        ),
-        (
-            "ASC",
-            vec![
-                (Some("a"), 3),
-                (Some("a"), 1),
-                (Some("b"), 9_007_199_254_740_993),
-                (None, 9),
-            ],
-        ),
-        (
-            "DESC",
-            vec![
-                (Some("b"), 9_007_199_254_740_993),
-                (Some("a"), 3),
-                (Some("a"), 1),
-                (None, 9),
-            ],
-        ),
-    ] {
-        let (connection, _) = service(Mode::Rows, None).await;
-        let result = connection
-            .query(
-                &format!("SELECT label, n FROM synthetic ORDER BY label {order}, n DESC"),
-                &QueryOptions::default(),
-                &QueryCancellation::new(),
-            )
-            .await
-            .unwrap();
-        assert!(result.warnings().is_empty());
-        let actual: Vec<_> = result
-            .batches()
-            .iter()
-            .flat_map(|batch| {
-                let labels = batch
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                let ids = batch
-                    .column(1)
-                    .as_any()
-                    .downcast_ref::<Int64Array>()
-                    .unwrap();
-                labels
-                    .iter()
-                    .zip(ids.iter())
-                    .map(|(label, id)| (label.map(str::to_owned), id))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        let expected: Vec<_> = expected
-            .into_iter()
-            .map(|(label, id)| (label.map(str::to_owned), Some(id)))
-            .collect();
-        assert_eq!(actual, expected, "ORDER BY label {order}");
-    }
 }
 
 #[tokio::test]
@@ -841,88 +812,22 @@ async fn public_query_rejects_unverifiable_kms_settings_before_submission() {
 }
 
 #[tokio::test]
-async fn decoded_array_budget_is_independent_of_parquet_preflight_and_accepts_exact_limit() {
-    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-    let (connection, state) = service(Mode::CompactRows, None).await;
+async fn manifest_api_remains_authoritative_when_statistics_omit_the_location() {
+    let (connection, state) = service(Mode::NoManifest, None).await;
     let result = connection
-        .query(
-            "SELECT label FROM synthetic",
-            &QueryOptions::default(),
-            &QueryCancellation::new(),
-        )
+        .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
         .await
         .unwrap();
-    let decoded: usize = result
-        .batches()
-        .iter()
-        .map(RecordBatch::get_array_memory_size)
-        .sum();
-    let file = state.lock().unwrap().files[0].clone();
-    let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(file)).unwrap();
-    let uncompressed: usize = reader
-        .metadata()
-        .row_groups()
-        .iter()
-        .map(|group| usize::try_from(group.total_byte_size()).unwrap())
-        .sum();
-    assert!(
-        decoded > uncompressed,
-        "fixture must pass the earlier uncompressed-byte preflight"
+    assert_eq!(result.row_count(), 4);
+    assert!(result.schema().is_some());
+    assert_eq!(
+        state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .filter(|op| *op == "GetQueryResults")
+            .count(),
+        2
     );
-    for (limit, accepted) in [(decoded - 1, false), (decoded, true)] {
-        let (connection, _) = service(Mode::CompactRows, None).await;
-        let options = QueryOptions {
-            result_limits: ResultLimits {
-                max_decoded_bytes: limit,
-                ..ResultLimits::default()
-            },
-            ..QueryOptions::default()
-        };
-        let result = connection
-            .query(
-                "SELECT label FROM synthetic",
-                &options,
-                &QueryCancellation::new(),
-            )
-            .await;
-        if accepted {
-            assert_eq!(result.unwrap().row_count(), 128);
-        } else {
-            assert!(matches!(
-                result,
-                Err(Error::Result {
-                    reason: ResultError::LimitExceeded("decoded bytes"),
-                    ..
-                })
-            ));
-        }
-    }
-}
-
-#[tokio::test]
-async fn real_row_limit_rejects_the_preflight_allowance_and_accepts_exact_limit() {
-    for (max_rows, accepted) in [(3, false), (4, true)] {
-        let (connection, _) = service(Mode::Rows, None).await;
-        let options = QueryOptions {
-            result_limits: ResultLimits {
-                max_rows,
-                ..ResultLimits::default()
-            },
-            ..QueryOptions::default()
-        };
-        let result = connection
-            .query(SQL, &options, &QueryCancellation::new())
-            .await;
-        if accepted {
-            assert_eq!(result.unwrap().row_count(), 4);
-        } else {
-            assert!(matches!(
-                result,
-                Err(Error::Result {
-                    reason: ResultError::LimitExceeded("row count"),
-                    ..
-                })
-            ));
-        }
-    }
 }

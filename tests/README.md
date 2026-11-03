@@ -55,9 +55,11 @@ Add `--wait-for-expiry` to wait for the real one-hour explicit-role lifetime and
 
 Controlled final acceptance uses `--workgroup`, `--schema`, `--expected-account`, `--expected-role`, optional `--role-arn` and optional catalog-only `--table`, together with standard `--profile`/`--region` and the explicit `--run-live` flag. It uses only the fixed invented literal queries; the supplied table is never selected. Run the research check from the enclave's existing identity. No production trust exception is needed.
 
-The core preserves an empty result's Parquet schema by adding a private presence column inside a singleton outer join. A zero-row result emits one all-NULL presence row; the reader removes it and its private column. Actual all-NULL rows carry a true marker and survive. This avoids guessing nested Arrow types from a file-free manifest. A missing schema-bearing file is an error.
+The core wraps the supplied SQL in UNLOAD after trimming whitespace and one trailing semicolon. Athena validates the SQL. File paths come from paginated `GetQueryResults` calls with `QueryResultType::DataManifest`; the upstream Parquet reader decodes the files into Arrow. The reader follows manifest entries only and checks server-side encryption. SSE-KMS accepts a full key ARN or standard key UUID; aliases are rejected before submission because object identity cannot be verified from them.
 
-Query results are bounded collections. Defaults are 1 MiB of manifest data, 256 files, 64 MiB per file, 256 MiB downloaded, 256 MiB of decoded arrays, one million rows and four concurrent downloads. Pages are capped at 8 MiB, headers at 64 KiB and footers at 1 MiB. Schemas are limited to 4096 physical nodes and depth 32. Dictionary and repeated-value expansion is conservatively checked before Arrow allocation; a skewed dictionary can require a deliberately larger decoded limit. PLAIN and dictionary byte-array encodings are supported; prefix/delta byte-array encodings and fixed widths above 32 bytes are explicit errors. Sorting can temporarily need additional copies and row indices; these are collection limits, not a hard process-memory cap. `QueryOptions.result_limits` allows deliberate adjustment. The reader follows manifest entries only and checks server-side encryption. SSE-KMS accepts a full key ARN or standard key UUID; aliases are rejected before submission because object identity cannot be verified from them. Unsupported timezone-bearing timestamps and duplicate names are explicit errors. Final ordering of returned scalar columns/aliases/ordinals is restored; an unavailable or unsupported sort key returns an `OrderNotRestored` warning.
+An empty UNLOAD may produce no Parquet files. The result then has zero rows, `schema()` returns `None` and `into_reader()` returns `None`. If Athena writes a zero-row Parquet file, its schema and reader remain available. The core submits no extra SQL to recover a schema. All-NULL rows are ordinary result rows.
+
+UNLOAD writes multiple files in parallel and does not guarantee their combined row order, even when the query contains `ORDER BY`. The core returns the decoded rows without sorting them. Acceptance checks compare values without assuming cross-file order.
 
 ## Independent Python probe
 
@@ -72,7 +74,7 @@ The contract supplies the region, account, exact role chain, workgroups, databas
 
 For each seat it checks literal types, an empty query and the named invented Parquet fixture, including NULL, empty string, exact int64, decimal, timestamp and array values. Table/column discovery uses metadata APIs without submitting a query. It also requires denied access to the other test workgroup and to a known fixture object's source bytes. Manifest entries and downloads are confined to the generated output prefixes. Results must match the workgroup's encryption; only assertion outcomes, zero-row representation and safe failure identifiers are printed.
 
-Three bounded UNLOAD queries run per seat. Athena writes fresh outputs under that seat's test prefix; the environment expires them after three days. The harness has no deletion or infrastructure permissions. Its unwrapped zero-row query records a manifest with no files and no Parquet schema; the Rust reader uses the presence-column strategy described above.
+Three UNLOAD queries run per seat. Athena writes fresh outputs under that seat's test prefix; the environment expires them after three days. The harness has no deletion or infrastructure permissions. Its zero-row query reports whether Athena wrote a manifest or Parquet files; a Parquet schema is available only when a file exists.
 
 Run the same transport and safety checks with fake services:
 
@@ -107,6 +109,6 @@ and scale, array element type, NULLs and timezone changes remain checked.
 
 Successful core queries include `SessionExpiring` in their warnings during the
 last fifteen minutes of an explicit role lease. Hosts must present those warnings;
-`into_reader_with_warnings` preserves them during Arrow handoff. Service errors
-retain modeled operational guidance. Raw responses, credential-provider details
+`into_reader_with_warnings()` returns the optional Arrow reader together with
+the warnings. Service errors retain modeled operational guidance. Raw responses, credential-provider details
 and signed authentication diagnostics are excluded.

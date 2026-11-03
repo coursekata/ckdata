@@ -286,23 +286,33 @@ async fn run_query(connection: &Connection, sql: &str) -> Result<QueryResult, St
 fn check_types(result: &QueryResult) -> Result<(), String> {
     require(
         result.row_count() == 2 && result.warnings().is_empty(),
-        "literal count or ordering warning changed",
+        "literal count or session warning changed",
     )?;
-    check_probe_batches(&result.schema(), result.batches())
+    let schema = result.schema().ok_or("nonempty result has no schema")?;
+    check_probe_batches(&schema, result.batches())
 }
 
 fn check_probe_batches(
     schema: &arrow_schema::SchemaRef,
     batches: &[arrow_array::RecordBatch],
 ) -> Result<(), String> {
-    // The bounded reader may retain several batches even for this two-row probe.
+    // The reader may retain several batches even for this two-row probe.
     let batch = arrow_select::concat::concat_batches(schema, batches)
         .map_err(|_| "cannot combine the fixed probe")?;
+    require(
+        batch.num_rows() == 2 && batch.num_columns() == 7,
+        "literal shape changed",
+    )?;
     let id = batch
         .column(0)
         .as_any()
         .downcast_ref::<Int32Array>()
         .ok_or("id type changed")?;
+    let (first, second) = match id.iter().collect::<Vec<_>>().as_slice() {
+        [Some(1), Some(2)] => (0, 1),
+        [Some(2), Some(1)] => (1, 0),
+        _ => return Err("literal ids changed".to_owned()),
+    };
     let nulls = batch
         .column(1)
         .as_any()
@@ -329,19 +339,19 @@ fn check_probe_batches(
             arrow_schema::TimeUnit::Second => timestamp
                 .as_any()
                 .downcast_ref::<PrimitiveArray<TimestampSecondType>>()
-                .map(|array| array.value(1) as i128 * 1_000_000_000),
+                .map(|array| array.value(first) as i128 * 1_000_000_000),
             arrow_schema::TimeUnit::Millisecond => timestamp
                 .as_any()
                 .downcast_ref::<PrimitiveArray<TimestampMillisecondType>>()
-                .map(|array| array.value(1) as i128 * 1_000_000),
+                .map(|array| array.value(first) as i128 * 1_000_000),
             arrow_schema::TimeUnit::Microsecond => timestamp
                 .as_any()
                 .downcast_ref::<PrimitiveArray<TimestampMicrosecondType>>()
-                .map(|array| array.value(1) as i128 * 1_000),
+                .map(|array| array.value(first) as i128 * 1_000),
             arrow_schema::TimeUnit::Nanosecond => timestamp
                 .as_any()
                 .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
-                .map(|array| array.value(1) as i128),
+                .map(|array| array.value(first) as i128),
         },
         _ => None,
     }
@@ -352,31 +362,30 @@ fn check_probe_batches(
         .downcast_ref::<ListArray>()
         .ok_or("array type changed")?;
     require(
-        id.iter().eq([Some(2), Some(1)])
-            && !nulls.is_null(0)
-            && nulls.value(0) == "a"
-            && nulls.is_null(1)
-            && !empty.is_null(0)
-            && empty.value(0) == "b"
-            && !empty.is_null(1)
-            && empty.value(1).is_empty()
-            && big.is_null(0)
-            && !big.is_null(1)
-            && big.value(1) == 9_007_199_254_740_993
-            && dec.is_null(0)
-            && !dec.is_null(1)
+        !nulls.is_null(second)
+            && nulls.value(second) == "a"
+            && nulls.is_null(first)
+            && !empty.is_null(second)
+            && empty.value(second) == "b"
+            && !empty.is_null(first)
+            && empty.value(first).is_empty()
+            && big.is_null(second)
+            && !big.is_null(first)
+            && big.value(first) == 9_007_199_254_740_993
+            && dec.is_null(second)
+            && !dec.is_null(first)
             && dec.precision() == 3
-            && dec.value(1) == 110
+            && dec.value(first) == 110
             && dec.scale() == 2
-            && timestamp.is_null(0)
-            && !timestamp.is_null(1)
+            && timestamp.is_null(second)
+            && !timestamp.is_null(first)
             && timestamp_ns == 1_792_154_096_789_000_000
-            && arr.is_null(0)
-            && !arr.is_null(1)
-            && arr.value_length(1) == 2,
+            && arr.is_null(second)
+            && !arr.is_null(first)
+            && arr.value_length(first) == 2,
         "literal values changed",
     )?;
-    let values = arr.value(1);
+    let values = arr.value(first);
     let values = values
         .as_any()
         .downcast_ref::<Int32Array>()
@@ -392,17 +401,26 @@ async fn checks(
     let sql = format!("{PROBE} ORDER BY id DESC");
     let result = run_query(connection, &sql).await?;
     check_types(&result)?;
-    println!("PASS literal Arrow types, values and final ordering");
+    println!("PASS literal Arrow types and values");
     let empty = run_query(
         connection,
         &format!("SELECT * FROM ({PROBE}) q WHERE FALSE ORDER BY id"),
     )
     .await?;
-    require(
-        empty.row_count() == 0 && empty.schema() == result.schema(),
-        "empty result lost its exact schema",
-    )?;
-    println!("PASS empty result retains schema");
+    require(empty.row_count() == 0, "empty result returned rows")?;
+    if let Some(schema) = empty.schema() {
+        require(
+            Some(schema) == result.schema(),
+            "empty Parquet schema differs",
+        )?;
+        println!("PASS empty result: zero rows; Parquet schema matches");
+    } else {
+        require(
+            empty.batches().is_empty(),
+            "result without a schema contains batches",
+        )?;
+        println!("PASS empty result: no Parquet files; schema unavailable");
+    }
     let all_null = run_query(connection, "SELECT CAST(NULL AS BIGINT) AS all_null").await?;
     require(
         all_null.row_count() == 1 && all_null.batches()[0].column(0).is_null(0),
@@ -631,7 +649,7 @@ async fn main() -> std::process::ExitCode {
 mod tests {
     use super::*;
     #[test]
-    fn fixed_probe_accepts_two_ordered_one_row_batches() {
+    fn fixed_probe_accepts_rows_in_either_order_across_batches() {
         use arrow_array::{ArrayRef, RecordBatch, types::Int32Type};
         use std::sync::Arc;
         let list =
@@ -666,6 +684,7 @@ mod tests {
         ])
         .unwrap();
         check_probe_batches(&batch.schema(), &[batch.slice(0, 1), batch.slice(1, 1)]).unwrap();
+        check_probe_batches(&batch.schema(), &[batch.slice(1, 1), batch.slice(0, 1)]).unwrap();
     }
     #[test]
     fn help_and_live_gate_require_no_aws_configuration() {

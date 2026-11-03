@@ -91,44 +91,19 @@ fn requests(http: &StaticReplayClient) -> Vec<(String, Value)> {
 }
 
 #[test]
-fn parses_one_read_only_query_without_losing_nested_ordering_or_quoted_text() {
+fn query_text_preserves_sql_and_only_removes_a_terminal_delimiter() {
     for sql in [
-        "SELECT NULL AS s_null, '' AS s_empty, 9007199254740993 AS big",
-        "WITH t AS (SELECT 1 AS x) SELECT x FROM t ORDER BY x DESC NULLS FIRST; -- end",
         "SELECT '; DELETE FROM fake' AS \"odd; name\" ORDER BY 1",
+        "WITH t AS (SELECT 1 AS x) SELECT x FROM t",
         "SELECT * FROM (SELECT 1 AS x ORDER BY x) t ORDER BY x DESC",
-        "SELECT 1 UNION ALL SELECT 2 ORDER BY 1",
-        "VALUES (1), (2)",
+        "SELECT CAST(1 AS BIGINT) -- a trailing comment",
     ] {
-        let query = read_query(sql).unwrap();
-        assert!(read_query(&query.to_string()).is_ok());
+        assert_eq!(query_text(sql).unwrap(), sql);
     }
-    let query = read_query("SELECT * FROM (SELECT 1 AS x ORDER BY x) t ORDER BY x DESC").unwrap();
-    assert_eq!(query.order_by.unwrap().to_string(), "ORDER BY x DESC");
-}
-
-#[test]
-fn rejects_multiple_statements_nested_writes_and_locks_without_echoing_sql() {
-    for sql in [
-        "",
-        ";",
-        "SELECT 1; SELECT 2",
-        "DELETE FROM synthetic",
-        "CREATE TABLE synthetic AS SELECT 1",
-        "EXPLAIN SELECT 1",
-        "SELECT 1 INTO synthetic",
-        "SELECT * FROM (SELECT 1 INTO synthetic) t",
-        "WITH x AS (DELETE FROM synthetic RETURNING *) SELECT * FROM x",
-        "SELECT * FROM synthetic FOR UPDATE",
-        "SELECT * FROM (SELECT * FROM synthetic FOR UPDATE) t",
-        "SELECT * FROM synthetic SETTINGS x = 1",
-        "SELECT 'private-synthetic-marker' +",
-    ] {
-        let error = read_query(sql).unwrap_err();
-        assert!(matches!(error, Error::InvalidQuery(_)), "{sql}");
-        assert!(!error.to_string().contains("private-synthetic-marker"));
+    assert_eq!(query_text("  SELECT 1;  ").unwrap(), "SELECT 1");
+    for sql in ["", "  ", ";"] {
+        assert!(matches!(query_text(sql), Err(Error::InvalidQuery(_))));
     }
-    assert!(read_query(&format!("SELECT {}1{}", "(".repeat(100), ")".repeat(100))).is_err());
 }
 
 #[tokio::test]
@@ -142,7 +117,7 @@ async fn invalid_sql_options_and_pre_cancelled_queries_make_no_requests() {
     let token = QueryCancellation::new();
     assert!(matches!(
         connection
-            .execute_unload("DROP TABLE synthetic", &QueryOptions::default(), &token)
+            .execute_unload("  ; ", &QueryOptions::default(), &token)
             .await,
         Err(Error::InvalidQuery(_))
     ));
@@ -181,7 +156,7 @@ async fn unload_uses_workgroup_settings_unique_output_and_tracks_state_regressio
     let result = connection(http.clone())
         .await
         .execute_unload(
-            "SELECT 1 AS x ORDER BY x DESC; -- trailing",
+            "SELECT 1 AS x ORDER BY x DESC -- trailing",
             &QueryOptions::default(),
             &QueryCancellation::new(),
         )
@@ -190,7 +165,7 @@ async fn unload_uses_workgroup_settings_unique_output_and_tracks_state_regressio
     assert_eq!(result.query_id, QUERY_ID);
     assert_eq!(
         result.manifest_location,
-        format!("{OUTPUT}{QUERY_ID}-manifest.csv")
+        Some(format!("{OUTPUT}{QUERY_ID}-manifest.csv"))
     );
     let requests = requests(&http);
     assert_eq!(
@@ -219,7 +194,7 @@ async fn unload_uses_workgroup_settings_unique_output_and_tracks_state_regressio
     assert_eq!(
         start["QueryString"],
         format!(
-            "UNLOAD (SELECT 1 AS x ORDER BY x DESC) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
+            "UNLOAD (\nSELECT 1 AS x ORDER BY x DESC -- trailing\n) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
             result.data_prefix
         )
     );
@@ -284,7 +259,6 @@ async fn deadline_stops_the_submitted_query_and_preserves_timeout_if_stop_fails(
         let options = QueryOptions {
             timeout: Duration::from_secs(2),
             poll_interval: Duration::from_secs(10),
-            ..QueryOptions::default()
         };
         let error = connection(http.clone())
             .await

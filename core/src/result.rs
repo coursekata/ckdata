@@ -1,109 +1,40 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use arrow_array::{RecordBatch, RecordBatchIterator, RecordBatchReader};
 use arrow_schema::SchemaRef;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use tokio::time::Instant;
-use uuid::Uuid;
 
-use crate::query::{RequestGuard, read_query};
+use crate::query::RequestGuard;
 use crate::{Connection, Error, QueryCancellation, QueryInterruption, QueryOptions};
 
 mod decode;
-mod preflight;
 pub(crate) mod transport;
-
-/// Collection limits, rather than a promise about total process memory. Sorting
-/// temporarily needs bounded sorted runs, output copies and row indices. Parquet
-/// decoding also needs scratch space. Increase limits deliberately for big reads.
-#[derive(Clone, Debug)]
-pub struct ResultLimits {
-    pub max_manifest_bytes: usize,
-    pub max_files: usize,
-    pub max_file_bytes: usize,
-    pub max_download_bytes: usize,
-    pub max_decoded_bytes: usize,
-    /// Upper bound per compressed/decoded Parquet page. Headers are separately
-    /// limited to 64 KiB; page value counts are capped at one per eight limit bytes.
-    pub max_page_bytes: usize,
-    pub max_rows: usize,
-    pub batch_size: usize,
-    pub download_concurrency: usize,
-}
-
-impl Default for ResultLimits {
-    fn default() -> Self {
-        Self {
-            max_manifest_bytes: 1024 * 1024,
-            max_files: 256,
-            max_file_bytes: 64 * 1024 * 1024,
-            max_download_bytes: 256 * 1024 * 1024,
-            max_decoded_bytes: 256 * 1024 * 1024,
-            max_page_bytes: 8 * 1024 * 1024,
-            max_rows: 1_000_000,
-            batch_size: 8192,
-            download_concurrency: 4,
-        }
-    }
-}
-
-impl ResultLimits {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
-        if [
-            self.max_manifest_bytes,
-            self.max_files,
-            self.max_file_bytes,
-            self.max_download_bytes,
-            self.max_decoded_bytes,
-            self.max_page_bytes,
-            self.max_rows,
-            self.batch_size,
-            self.download_concurrency,
-        ]
-        .contains(&0)
-            || self.max_rows > u32::MAX as usize - 1
-            || self.batch_size > 65536
-            || self.download_concurrency > 16
-        {
-            return Err(Error::InvalidSetting("result limits"));
-        }
-        Ok(())
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueryWarning {
-    /// The result rows are correct, but this outer ORDER BY cannot be reproduced
-    /// from returned columns with supported local sort semantics.
-    OrderNotRestored { reason: &'static str },
     /// Hosts should display this before presenting the next result.
     SessionExpiring { remaining: std::time::Duration },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ResultError {
-    #[error("result exceeds the configured {0} limit")]
-    LimitExceeded(&'static str),
     #[error("invalid manifest: {0}")]
     InvalidManifest(&'static str),
     #[error("invalid Parquet result: {0}")]
     InvalidParquet(&'static str),
     #[error("invalid result schema: {0}")]
     InvalidSchema(&'static str),
-    #[error("unsupported result type: {0}")]
-    UnsupportedType(&'static str),
     #[error("object encryption differs from the workgroup configuration")]
     EncryptionMismatch,
     #[error("{0}")]
     Interrupted(QueryInterruption),
 }
 
-/// An owned, bounded collection of Arrow batches. Values remain in Arrow rather
-/// than passing through text, JSON or floating-point conversion.
+/// Arrow batches decoded from Athena's result files, without local row sorting.
+/// A result with no files has no schema; an actual empty Parquet file retains
+/// its schema. This collection imposes no row or byte limit.
 pub struct QueryResult {
     query_id: String,
-    schema: SchemaRef,
+    schema: Option<SchemaRef>,
     batches: Vec<RecordBatch>,
     warnings: Vec<QueryWarning>,
 }
@@ -124,7 +55,8 @@ impl QueryResult {
     pub fn query_id(&self) -> &str {
         &self.query_id
     }
-    pub fn schema(&self) -> SchemaRef {
+    /// None when Athena produced no schema-bearing Parquet file.
+    pub fn schema(&self) -> Option<SchemaRef> {
         self.schema.clone()
     }
     pub fn batches(&self) -> &[RecordBatch] {
@@ -136,25 +68,27 @@ impl QueryResult {
     pub fn row_count(&self) -> usize {
         self.batches.iter().map(RecordBatch::num_rows).sum()
     }
-    /// Transfer the Arrow data. Read `warnings()` first, or use
-    /// `into_reader_with_warnings` to retain host-visible diagnostics.
-    pub fn into_reader(self) -> impl RecordBatchReader + Send {
-        RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema)
+    /// Transfer the Arrow data when a schema exists. Read warnings first, or
+    /// use into_reader_with_warnings to retain them alongside an absent reader.
+    pub fn into_reader(self) -> Option<impl RecordBatchReader + Send> {
+        self.schema
+            .map(|schema| RecordBatchIterator::new(self.batches.into_iter().map(Ok), schema))
     }
-
-    /// Preserve warnings when transferring the stream to a language binding.
-    pub fn into_reader_with_warnings(self) -> (impl RecordBatchReader + Send, Vec<QueryWarning>) {
-        (
-            RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema),
-            self.warnings,
-        )
+    pub fn into_reader_with_warnings(
+        self,
+    ) -> (Option<impl RecordBatchReader + Send>, Vec<QueryWarning>) {
+        let warnings = self.warnings;
+        let reader = self
+            .schema
+            .map(|schema| RecordBatchIterator::new(self.batches.into_iter().map(Ok), schema));
+        (reader, warnings)
     }
 }
 
 impl Connection {
-    /// Read one SELECT/VALUES query into Arrow, within the supplied limits.
-    /// A private presence column makes even an empty result carry its Parquet
-    /// schema. It and the single synthetic empty row never reach the caller.
+    /// Run the supplied SQL through Parquet UNLOAD and decode its result files
+    /// with the Parquet library. SQL is not rewritten to manufacture empty rows,
+    /// and UNLOAD's lack of global file ordering is preserved.
     /// Keep awaiting this future after signalling cancellation.
     pub async fn query(
         &self,
@@ -164,11 +98,13 @@ impl Connection {
     ) -> Result<QueryResult, Error> {
         options.validate()?;
         let deadline = Instant::now() + options.timeout;
-        let query = read_query(sql)?;
-        let marker = format!("__ckdata_presence_{}", Uuid::new_v4().simple());
-        let wrapped = presence_query(&query.to_string(), &marker);
         let execution = self
-            .execute_sql_unload(wrapped, options, cancellation, deadline)
+            .execute_sql_unload(
+                crate::query::query_text(sql)?.to_owned(),
+                options,
+                cancellation,
+                deadline,
+            )
             .await?;
         let result_cancellation = cancellation.child_token();
         let _cancel_background_work = result_cancellation.clone().drop_guard();
@@ -177,35 +113,20 @@ impl Connection {
             cancellation: &result_cancellation,
             deadline,
         };
-        let budget = Arc::new(Budget::default());
-        let files = transport::manifest(self, &execution, &options.result_limits, &guard)
+        let files = transport::manifest(self, &execution, &guard)
             .await
             .map_err(|reason| result_error(&execution.query_id, reason))?;
-        let mut pending = stream::iter(files.into_iter().enumerate())
-            .map(|(index, file)| {
-                let budget = budget.clone();
-                let marker = marker.clone();
+        let mut pending = stream::iter(files)
+            .map(|file| {
                 let execution = &execution;
                 let guard = &guard;
                 let cancellation = result_cancellation.clone();
                 async move {
-                    let bytes = transport::download(
-                        self,
-                        &file,
-                        execution,
-                        &options.result_limits,
-                        guard,
-                        &budget,
-                    )
-                    .await?;
+                    let bytes = transport::download(self, &file, execution, guard).await?;
                     let connection = self.clone();
-                    let limits = options.result_limits.clone();
                     let task = tokio::task::spawn_blocking(move || {
                         decode::decode(
                             bytes,
-                            &marker,
-                            &limits,
-                            &budget,
                             &RequestGuard {
                                 connection: &connection,
                                 cancellation: &cancellation,
@@ -213,84 +134,35 @@ impl Connection {
                             },
                         )
                     });
-                    let decoded = wait_for_worker(guard, task, "decoder task failed").await?;
-                    Ok::<_, ResultError>((index, decoded))
+                    wait_for_worker(guard, task).await
                 }
             })
-            .buffer_unordered(options.result_limits.download_concurrency);
-        let mut decoded = Vec::new();
-        while let Some(item) = pending
+            // A small transfer queue controls concurrency, not result size.
+            .buffered(4);
+        let mut schema = None;
+        let mut batches = Vec::new();
+        while let Some(file) = pending
             .try_next()
             .await
             .map_err(|reason| result_error(&execution.query_id, reason))?
         {
-            decoded.push(item);
-        }
-        drop(pending);
-        decoded.sort_by_key(|(index, _)| *index);
-        let schema = decoded
-            .first()
-            .ok_or_else(|| {
-                result_error(
-                    &execution.query_id,
-                    ResultError::InvalidManifest("no schema-bearing files"),
-                )
-            })?
-            .1
-            .schema
-            .clone();
-        let mut batches = Vec::new();
-        let mut sentinels = 0;
-        for (_, file) in decoded {
-            if file.schema != schema {
-                return Err(result_error(
-                    &execution.query_id,
-                    ResultError::InvalidSchema("files have inconsistent schemas"),
-                ));
+            if let Some(expected) = &schema {
+                if expected != &file.schema {
+                    return Err(result_error(
+                        &execution.query_id,
+                        ResultError::InvalidSchema("files have inconsistent schemas"),
+                    ));
+                }
+            } else {
+                schema = Some(file.schema);
             }
-            sentinels += file.sentinels;
             batches.extend(file.batches);
         }
-        let rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
-        if rows > options.result_limits.max_rows {
-            return Err(result_error(
-                &execution.query_id,
-                ResultError::LimitExceeded("row count"),
-            ));
-        }
-        if sentinels > 1 || (sentinels != 0 && rows != 0) {
-            return Err(result_error(
-                &execution.query_id,
-                ResultError::InvalidParquet("inconsistent empty-result marker"),
-            ));
-        }
+        drop(pending);
         guard.check().map_err(|reason| {
             result_error(&execution.query_id, ResultError::Interrupted(reason))
         })?;
-        let plan = crate::ordering::plan(&query, &schema);
-        let (batches, mut warnings) = match plan {
-            Ok(keys) if !keys.is_empty() && rows > 1 => {
-                let connection = self.clone();
-                let cancellation = result_cancellation.clone();
-                let task = tokio::task::spawn_blocking(move || {
-                    let guard = RequestGuard {
-                        connection: &connection,
-                        cancellation: &cancellation,
-                        deadline,
-                    };
-                    guard.check().map_err(ResultError::Interrupted)?;
-                    let batches = crate::ordering::sort(batches, &keys, &guard)?;
-                    guard.check().map_err(ResultError::Interrupted)?;
-                    Ok::<_, ResultError>(batches)
-                });
-                let sorted = wait_for_worker(&guard, task, "sort task failed")
-                    .await
-                    .map_err(|reason| result_error(&execution.query_id, reason))?;
-                (sorted, vec![])
-            }
-            Ok(_) => (batches, vec![]),
-            Err(warning) => (batches, vec![warning]),
-        };
+        let mut warnings = Vec::new();
         if let crate::SessionStatus::Expiring { remaining, .. } =
             self.session_status().map_err(|_| {
                 result_error(
@@ -310,12 +182,6 @@ impl Connection {
     }
 }
 
-fn presence_query(query: &str, marker: &str) -> String {
-    format!(
-        "SELECT ckdata_rows.* FROM (VALUES (TRUE)) AS ckdata_seed(unused) LEFT JOIN (SELECT ckdata_input.*, TRUE AS \"{marker}\" FROM ({query}) AS ckdata_input) AS ckdata_rows ON TRUE"
-    )
-}
-
 fn result_error(query_id: &str, reason: ResultError) -> Error {
     Error::Result {
         query_id: query_id.to_owned(),
@@ -323,45 +189,15 @@ fn result_error(query_id: &str, reason: ResultError) -> Error {
     }
 }
 
-#[derive(Default)]
-struct Budget {
-    downloaded: AtomicUsize,
-    uncompressed: AtomicUsize,
-    decoded: AtomicUsize,
-    expanded: AtomicUsize,
-    rows: AtomicUsize,
-    returned_rows: AtomicUsize,
-}
-
 async fn wait_for_worker<T>(
     guard: &RequestGuard<'_>,
     task: tokio::task::JoinHandle<Result<T, ResultError>>,
-    failure: &'static str,
 ) -> Result<T, ResultError> {
     guard
         .run(async { Ok(task.await) })
         .await
         .map_err(ResultError::Interrupted)?
-        .map_err(|_| ResultError::InvalidParquet(failure))?
-}
-
-fn reserve(
-    counter: &AtomicUsize,
-    bytes: usize,
-    limit: usize,
-    name: &'static str,
-) -> Result<(), ResultError> {
-    let mut current = counter.load(Ordering::Relaxed);
-    loop {
-        let next = current
-            .checked_add(bytes)
-            .filter(|total| *total <= limit)
-            .ok_or(ResultError::LimitExceeded(name))?;
-        match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => return Ok(()),
-            Err(updated) => current = updated,
-        }
-    }
+        .map_err(|_| ResultError::InvalidParquet("decoder task failed"))?
 }
 
 #[cfg(test)]

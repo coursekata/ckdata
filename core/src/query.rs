@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::ops::ControlFlow;
 use std::time::Duration;
 
 use aws_sdk_athena::Client;
@@ -9,9 +8,6 @@ use aws_sdk_athena::types::{
     EncryptionOption, QueryExecutionContext, QueryExecutionState, ResultConfiguration,
     WorkGroupState,
 };
-use sqlparser::ast::{Query, Select, SetExpr, Statement, Visit, Visitor};
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use uuid::Uuid;
 
@@ -26,7 +22,6 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct QueryOptions {
     pub timeout: Duration,
     pub poll_interval: Duration,
-    pub result_limits: crate::ResultLimits,
 }
 
 impl Default for QueryOptions {
@@ -34,7 +29,6 @@ impl Default for QueryOptions {
         Self {
             timeout: Duration::from_secs(30 * 60),
             poll_interval: Duration::from_secs(1),
-            result_limits: crate::ResultLimits::default(),
         }
     }
 }
@@ -48,7 +42,7 @@ impl QueryOptions {
         {
             return Err(Error::InvalidSetting("query timeout or poll interval"));
         }
-        self.result_limits.validate()
+        Ok(())
     }
 }
 
@@ -89,13 +83,14 @@ pub enum CancellationStatus {
 #[derive(Clone, Debug)]
 pub struct QueryExecution {
     pub query_id: String,
-    pub manifest_location: String,
+    pub manifest_location: Option<String>,
     pub data_prefix: String,
     pub result_configuration: ResultConfiguration,
 }
 
 impl Connection {
-    /// Submit one read-only query as Parquet UNLOAD and await its completion.
+    /// Submit the supplied SQL inside Parquet UNLOAD and await its completion.
+    /// Athena validates the enclosed query.
     /// Output goes under a fresh prefix in the workgroup's configured result
     /// location. No bucket listing or deletion is performed.
     ///
@@ -108,10 +103,10 @@ impl Connection {
         options: &QueryOptions,
         cancellation: &QueryCancellation,
     ) -> Result<QueryExecution, Error> {
-        let query = read_query(sql)?;
+        let query = query_text(sql)?;
         options.validate()?;
         self.execute_sql_unload(
-            query.to_string(),
+            query.to_owned(),
             options,
             cancellation,
             Instant::now() + options.timeout,
@@ -208,12 +203,9 @@ impl Connection {
             configuration: configuration.clone(),
         };
         let unload = format!(
-            "UNLOAD ({query}) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
+            "UNLOAD (\n{query}\n) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
             destination.data_prefix.replace('\'', "''")
         );
-        if unload.len() > 256 * 1024 {
-            return Err(Error::InvalidQuery("wrapped query exceeds 256 KiB"));
-        }
         guard.check().map_err(before_submission)?;
         // Do not race cancellation against StartQueryExecution: its response is
         // needed to stop a query accepted just before the interruption. The SDK
@@ -315,11 +307,17 @@ impl Connection {
                     let manifest = execution
                         .statistics()
                         .and_then(|stats| stats.data_manifest_location())
-                        .filter(|location| {
-                            location.starts_with(&destination.output_prefix)
+                        .filter(|location| !location.is_empty())
+                        .map(|location| {
+                            if location.starts_with(&destination.output_prefix)
                                 && s3_location(location)
+                            {
+                                Ok(location.to_owned())
+                            } else {
+                                Err(QueryInterruption::InvalidResponse("manifest location"))
+                            }
                         })
-                        .ok_or(QueryInterruption::InvalidResponse("manifest location"))?;
+                        .transpose()?;
                     let actual = execution
                         .result_configuration()
                         .filter(|actual| {
@@ -337,7 +335,7 @@ impl Connection {
                         ))?;
                     return Ok(QueryExecution {
                         query_id: query_id.to_owned(),
-                        manifest_location: manifest.to_owned(),
+                        manifest_location: manifest,
                         data_prefix: destination.data_prefix.clone(),
                         result_configuration: actual.clone(),
                     });
@@ -451,66 +449,18 @@ impl From<QueryInterruption> for PollError {
     }
 }
 
-pub(crate) fn read_query(sql: &str) -> Result<Box<Query>, Error> {
-    if sql.len() > 256 * 1024 {
-        return Err(Error::InvalidQuery("query exceeds 256 KiB"));
-    }
-    // Parser errors can contain fragments of the SQL. Do not include those in
-    // diagnostics; the caller already has the original statement.
-    let mut statements = Parser::new(&GenericDialect)
-        .with_recursion_limit(64)
-        .try_with_sql(sql)
-        .and_then(|mut parser| parser.parse_statements())
-        .map_err(|_| Error::InvalidQuery("could not parse a supported SELECT or VALUES query"))?;
-    if statements.len() != 1 {
-        return Err(Error::InvalidQuery("provide exactly one query"));
-    }
-    let Statement::Query(query) = statements.remove(0) else {
-        return Err(Error::InvalidQuery(
-            "only SELECT and VALUES queries are supported",
-        ));
-    };
-    if let ControlFlow::Break(reason) = query.visit(&mut ReadOnly) {
-        return Err(Error::InvalidQuery(reason));
-    }
-    Ok(query)
-}
-
-struct ReadOnly;
-impl Visitor for ReadOnly {
-    type Break = &'static str;
-    fn pre_visit_statement(&mut self, statement: &Statement) -> ControlFlow<Self::Break> {
-        if !matches!(statement, Statement::Query(_)) {
-            return ControlFlow::Break("data-changing statements are not supported");
-        }
-        ControlFlow::Continue(())
-    }
-    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<Self::Break> {
-        if !query.locks.is_empty()
-            || query.for_clause.is_some()
-            || query.settings.is_some()
-            || query.format_clause.is_some()
-            || !query.pipe_operators.is_empty()
-        {
-            return ControlFlow::Break("locking and output modifiers are not supported");
-        }
-        fn allowed(body: &SetExpr) -> bool {
-            match body {
-                SetExpr::Select(_) | SetExpr::Query(_) | SetExpr::Values(_) => true,
-                SetExpr::SetOperation { left, right, .. } => allowed(left) && allowed(right),
-                _ => false,
-            }
-        }
-        if !allowed(&query.body) {
-            return ControlFlow::Break("only SELECT and VALUES queries are supported");
-        }
-        ControlFlow::Continue(())
-    }
-    fn pre_visit_select(&mut self, select: &Select) -> ControlFlow<Self::Break> {
-        if select.into.is_some() {
-            return ControlFlow::Break("SELECT INTO is not supported");
-        }
-        ControlFlow::Continue(())
+pub(crate) fn query_text(sql: &str) -> Result<&str, Error> {
+    // Remove only surrounding whitespace and one terminal delimiter. The SQL
+    // body, including comments and dialect-specific syntax, belongs to Athena.
+    let query = sql
+        .trim()
+        .strip_suffix(';')
+        .unwrap_or(sql.trim())
+        .trim_end();
+    if query.is_empty() {
+        Err(Error::InvalidQuery("provide a query"))
+    } else {
+        Ok(query)
     }
 }
 

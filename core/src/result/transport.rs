@@ -1,17 +1,15 @@
 use std::collections::HashSet;
 use std::future::Future;
-use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
-use aws_sdk_athena::types::{EncryptionOption, ResultConfiguration};
+use aws_sdk_athena::types::{EncryptionOption, QueryResultType, ResultConfiguration};
 use aws_sdk_s3::config::timeout::TimeoutConfig;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::types::ServerSideEncryption;
-use bytes::{Bytes, BytesMut};
-use tokio::time::timeout;
+use bytes::Bytes;
 use uuid::Uuid;
 
-use super::{Budget, ResultError, ResultLimits, reserve};
+use super::ResultError;
 use crate::location::S3Location;
 use crate::query::RequestGuard;
 use crate::{Connection, QueryExecution, QueryInterruption};
@@ -63,72 +61,85 @@ fn kms_key_matches(expected: &str, actual: Option<&str>) -> bool {
     key_uuid(actual).or_else(|| key_id_from_arn(actual).and_then(key_uuid)) == Some(expected)
 }
 
-async fn read_body_chunk<T>(read: impl Future<Output = T>) -> Result<T, QueryInterruption> {
-    timeout(REQUEST_TIMEOUT, read)
-        .await
-        .map_err(|_| QueryInterruption::RequestFailed {
-            operation: "GetObject body",
-            code: "request timed out".into(),
-            message: None,
-        })
+async fn read_body<T>(
+    read: impl Future<Output = T>,
+    guard: &RequestGuard<'_>,
+) -> Result<T, QueryInterruption> {
+    guard.run(async { Ok(read.await) }).await
 }
 
 pub(super) async fn manifest(
     connection: &Connection,
     execution: &QueryExecution,
-    limits: &ResultLimits,
     guard: &RequestGuard<'_>,
 ) -> Result<Vec<S3Location>, ResultError> {
-    let location = S3Location::parse(&execution.manifest_location)
-        .ok_or(ResultError::InvalidManifest("invalid manifest location"))?;
-    let bytes = object(
-        connection,
-        &location,
-        &execution.result_configuration,
-        limits.max_manifest_bytes,
-        &AtomicUsize::new(0),
-        limits.max_manifest_bytes,
-        guard,
-    )
-    .await?;
-    parse_manifest(&bytes, &execution.data_prefix, limits.max_files)
-}
-
-fn parse_manifest(
-    bytes: &[u8],
-    prefix: &str,
-    max_files: usize,
-) -> Result<Vec<S3Location>, ResultError> {
+    let client = aws_sdk_athena::Client::from_conf(
+        aws_sdk_athena::config::Builder::from(connection.aws_config())
+            .timeout_config(
+                aws_sdk_athena::config::timeout::TimeoutConfig::builder()
+                    .operation_timeout(REQUEST_TIMEOUT)
+                    .build(),
+            )
+            .build(),
+    );
+    let mut pages = client
+        .get_query_results()
+        .query_execution_id(&execution.query_id)
+        .query_result_type(QueryResultType::DataManifest)
+        .into_paginator()
+        .send();
     let mut files = Vec::new();
     let mut seen = HashSet::new();
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(false)
-        .from_reader(bytes);
-    for record in reader.records() {
-        let record = record.map_err(|_| ResultError::InvalidManifest("invalid CSV"))?;
-        if record.len() != 1 {
-            return Err(ResultError::InvalidManifest("expected one URI per row"));
+    while let Some(page) = guard
+        .run(async { Ok(pages.next().await) })
+        .await
+        .map_err(ResultError::Interrupted)?
+    {
+        let page = page.map_err(|error| {
+            ResultError::Interrupted(QueryInterruption::RequestFailed {
+                operation: "GetQueryResults",
+                code: error
+                    .as_service_error()
+                    .and_then(|error| error.code())
+                    .unwrap_or("request failed")
+                    .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
+            })
+        })?;
+        let Some(result_set) = page.result_set() else {
+            continue;
+        };
+        let header = result_set
+            .result_set_metadata()
+            .and_then(|metadata| metadata.column_info().first())
+            .map(|column| column.name());
+        for (index, row) in result_set.rows().iter().enumerate() {
+            let [datum] = row.data() else {
+                return Err(ResultError::InvalidManifest(
+                    "expected one file location per row",
+                ));
+            };
+            let uri = datum
+                .var_char_value()
+                .ok_or(ResultError::InvalidManifest("missing file location"))?;
+            // A metadata-named header is optional. Headerless responses retain
+            // their first file, including on later pages.
+            if index == 0 && !uri.starts_with("s3://") && header == Some(uri) {
+                continue;
+            }
+            if !uri.starts_with(&execution.data_prefix) {
+                return Err(ResultError::InvalidManifest(
+                    "file is outside this query's output prefix",
+                ));
+            }
+            let location = S3Location::parse(uri)
+                .filter(|location| !location.key.ends_with('/'))
+                .ok_or(ResultError::InvalidManifest("invalid file location"))?;
+            if !seen.insert(uri.to_owned()) {
+                return Err(ResultError::InvalidManifest("duplicate data file"));
+            }
+            files.push(location);
         }
-        let uri = &record[0];
-        if files.len() >= max_files {
-            return Err(ResultError::LimitExceeded("manifest file count"));
-        }
-        if !uri.starts_with(prefix) {
-            return Err(ResultError::InvalidManifest(
-                "file is outside this query's output prefix",
-            ));
-        }
-        let file = S3Location::parse(uri)
-            .filter(|file| !file.key.ends_with('/'))
-            .ok_or(ResultError::InvalidManifest("invalid data file URI"))?;
-        if !seen.insert(uri.to_owned()) {
-            return Err(ResultError::InvalidManifest("duplicate data file"));
-        }
-        files.push(file);
-    }
-    if files.is_empty() {
-        return Err(ResultError::InvalidManifest("no schema-bearing files"));
     }
     Ok(files)
 }
@@ -137,29 +148,15 @@ pub(super) async fn download(
     connection: &Connection,
     location: &S3Location,
     execution: &QueryExecution,
-    limits: &ResultLimits,
     guard: &RequestGuard<'_>,
-    budget: &Budget,
 ) -> Result<Bytes, ResultError> {
-    object(
-        connection,
-        location,
-        &execution.result_configuration,
-        limits.max_file_bytes,
-        &budget.downloaded,
-        limits.max_download_bytes,
-        guard,
-    )
-    .await
+    object(connection, location, &execution.result_configuration, guard).await
 }
 
 async fn object(
     connection: &Connection,
     location: &S3Location,
     configuration: &ResultConfiguration,
-    file_limit: usize,
-    total: &AtomicUsize,
-    total_limit: usize,
     guard: &RequestGuard<'_>,
 ) -> Result<Bytes, ResultError> {
     let client = aws_sdk_s3::Client::from_conf(
@@ -218,48 +215,17 @@ async fn object(
     if !encrypted {
         return Err(ResultError::EncryptionMismatch);
     }
-    let expected_len = response
-        .content_length()
-        .and_then(|length| usize::try_from(length).ok())
-        .ok_or(ResultError::InvalidParquet(
-            "object has no valid content length",
-        ))?;
-    if expected_len > file_limit {
-        return Err(ResultError::LimitExceeded("object bytes"));
-    }
-    let mut body = response.body;
-    let mut bytes = BytesMut::new();
-    loop {
-        let chunk = guard
-            .run(async {
-                read_body_chunk(body.next())
-                    .await?
-                    .transpose()
-                    .map_err(|_| QueryInterruption::RequestFailed {
-                        operation: "GetObject body",
-                        code: "response stream failed".into(),
-                        message: None,
-                    })
+    read_body(response.body.collect(), guard)
+        .await
+        .map_err(ResultError::Interrupted)?
+        .map(|body| body.into_bytes())
+        .map_err(|_| {
+            ResultError::Interrupted(QueryInterruption::RequestFailed {
+                operation: "GetObject body",
+                code: "response stream failed".into(),
+                message: None,
             })
-            .await
-            .map_err(ResultError::Interrupted)?;
-        let Some(chunk) = chunk else {
-            break;
-        };
-        if bytes
-            .len()
-            .checked_add(chunk.len())
-            .is_none_or(|length| length > file_limit)
-        {
-            return Err(ResultError::LimitExceeded("object bytes"));
-        }
-        reserve(total, chunk.len(), total_limit, "download bytes")?;
-        bytes.extend_from_slice(&chunk);
-    }
-    if bytes.len() != expected_len {
-        return Err(ResultError::InvalidParquet("incomplete object body"));
-    }
-    Ok(bytes.freeze())
+        })
 }
 
 #[cfg(test)]
@@ -287,19 +253,6 @@ mod tests {
         ] {
             assert!(!valid_kms_key(key), "{key}");
         }
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn stalled_body_read_stops_at_ten_seconds() {
-        let start = tokio::time::Instant::now();
-        assert!(matches!(
-            read_body_chunk(std::future::pending::<()>()).await,
-            Err(QueryInterruption::RequestFailed {
-                operation: "GetObject body",
-                ..
-            })
-        ));
-        assert_eq!(start.elapsed(), REQUEST_TIMEOUT);
     }
 
     #[tokio::test(start_paused = true)]
@@ -341,13 +294,27 @@ mod tests {
             cancellation: &cancellation,
             deadline: start + Duration::from_secs(60),
         };
+        let body = read_body(
+            async {
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                Bytes::from_static(b"synthetic body")
+            },
+            &guard,
+        )
+        .await
+        .unwrap();
+        assert_eq!(body, Bytes::from_static(b"synthetic body"));
+        assert_eq!(start.elapsed(), Duration::from_secs(12));
+        let start = tokio::time::Instant::now();
+        let guard = RequestGuard {
+            deadline: start + Duration::from_secs(60),
+            ..guard
+        };
         let result = object(
             &connection,
             &S3Location::parse("s3://synthetic/manifest.csv").unwrap(),
             &ResultConfiguration::builder().build(),
-            1024,
-            &AtomicUsize::new(0),
-            1024,
             &guard,
         )
         .await;
@@ -366,40 +333,8 @@ mod tests {
             deadline: start + Duration::from_secs(2),
             ..guard
         };
-        let result = guard
-            .run(async { read_body_chunk(std::future::pending::<()>()).await })
-            .await;
+        let result = read_body(std::future::pending::<()>(), &guard).await;
         assert_eq!(result, Err(QueryInterruption::TimedOut));
         assert_eq!(start.elapsed(), Duration::from_secs(2));
-    }
-
-    #[test]
-    fn rejects_malformed_duplicate_and_escaping_manifest_entries() {
-        let prefix = "s3://synthetic/query/";
-        let files = parse_manifest(
-            b"\"s3://synthetic/query/part-1\"\r\ns3://synthetic/query/part-2\n",
-            prefix,
-            2,
-        )
-        .unwrap();
-        assert_eq!(files.len(), 2);
-        for bytes in [
-            b"".as_slice(),
-            b"s3://other/query/part\n",
-            b"s3://synthetic/query/../part\n",
-            b"s3://synthetic/query/%2e%2e/part\n",
-            b"s3://synthetic/query/a\ns3://synthetic/query/a\n",
-            b"s3://synthetic/query/a,extra\n",
-        ] {
-            assert!(parse_manifest(bytes, prefix, 2).is_err());
-        }
-        assert!(matches!(
-            parse_manifest(
-                b"s3://synthetic/query/a\ns3://synthetic/query/b\n",
-                prefix,
-                1
-            ),
-            Err(ResultError::LimitExceeded(_))
-        ));
     }
 }

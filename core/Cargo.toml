@@ -13,22 +13,18 @@ aws-sdk-athena = { version = "1", default-features = false, features = ["default
 aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-types = "1"
-arrow-array = { version = "59", features = ["ffi"] }
+arrow-array = "59"
 arrow-schema = "59"
-arrow-ord = "59"
-arrow-select = "59"
 parquet = { version = "59", default-features = false, features = ["arrow", "snap"] }
-snap = "1"
 bytes = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["time", "macros", "rt"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-sqlparser = { version = "0.63", features = ["visitor"] }
 uuid = { version = "1", features = ["v4"] }
-csv = "1"
 futures-util = "0.3"
 
 [dev-dependencies]
+arrow-select = "59"
 aws-config = { version = "1", default-features = false, features = ["test-util"] }
 aws-smithy-async = "1"
 aws-smithy-http-client = { version = "1", features = ["test-util"] }

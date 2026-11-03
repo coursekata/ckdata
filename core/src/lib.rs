@@ -5,7 +5,6 @@ mod connection;
 mod error;
 mod location;
 mod metadata;
-mod ordering;
 mod query;
 mod result;
 mod settings;
@@ -14,7 +13,7 @@ pub use connection::{CallerIdentity, Connection, SessionStatus};
 pub use error::Error;
 pub use metadata::{ColumnMetadata, TableMetadata, TablePage};
 pub use query::{CancellationStatus, QueryExecution, QueryInterruption, QueryOptions};
-pub use result::{QueryResult, QueryWarning, ResultError, ResultLimits};
+pub use result::{QueryResult, QueryWarning, ResultError};
 pub use settings::ConnectionOptions;
 pub use tokio_util::sync::CancellationToken as QueryCancellation;
 
