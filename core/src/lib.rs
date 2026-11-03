@@ -1,6 +1,22 @@
-//! ckdata's shared core. For now it links the AWS SDK and Arrow crates the query path will use and
-//! returns a literal table through Parquet and Arrow, which both packages' tests check. It makes no AWS call, holds no
-//! credentials and configures no client.
+//! Shared connection and Arrow infrastructure for ckdata's R and Python bindings.
+//! `Connection::connect` explicitly resolves AWS credentials and may assume a role.
+//! The literal Arrow probe remains entirely offline.
+mod connection;
+mod error;
+mod location;
+mod metadata;
+mod query;
+mod result;
+mod settings;
+
+pub use connection::{CallerIdentity, Connection, SessionStatus};
+pub use error::Error;
+pub use metadata::{ColumnMetadata, TableMetadata, TablePage};
+pub use query::{CancellationStatus, QueryExecution, QueryInterruption, QueryOptions};
+pub use result::{QueryResult, QueryWarning, ResultError};
+pub use settings::ConnectionOptions;
+pub use tokio_util::sync::CancellationToken as QueryCancellation;
+
 use std::sync::Arc;
 
 use arrow_array::types::TimestampMillisecondType;
@@ -12,7 +28,7 @@ use bytes::Bytes;
 use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
-/// The core's version, then the version of each AWS SDK crate it links.
+/// The core version, then the Athena and S3 SDK versions.
 pub fn versions() -> Vec<String> {
     vec![
         format!("ckdata {}", env!("CARGO_PKG_VERSION")),

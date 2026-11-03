@@ -1,13 +1,54 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": "Runs as the hosted Renovate App, since nothing in this repository's CI holds cloud credentials. Dependabot keeps the action SHAs.",
-  "extends": ["github>coursekata/ck-ci//renovate/default.json"],
-  "enabledManagers": ["cargo", "pep621", "pre-commit"],
+  "extends": [
+    "github>coursekata/ck-ci//renovate/default.json"
+  ],
+  "enabledManagers": [
+    "cargo",
+    "pep621",
+    "pre-commit",
+    "custom.regex"
+  ],
   "packageRules": [
     {
       "description": "pyo3-arrow is built on one Arrow major, and two Arrow majors in one build fail to compile, so Arrow, Parquet and pyo3-arrow move together.",
-      "matchPackageNames": ["arrow-*", "parquet", "pyo3-arrow"],
+      "matchPackageNames": [
+        "arrow-*",
+        "parquet",
+        "pyo3-arrow"
+      ],
       "groupName": "Arrow"
     }
-  ]
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "TRIVY_VERSION: (?<currentValue>v[0-9.]+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "aquasecurity/trivy"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "prek-version: \"(?<currentValue>[0-9.]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "j178/prek"
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 4am on the first day of the month"
+    ]
+  }
 }

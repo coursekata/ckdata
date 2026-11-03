@@ -2,7 +2,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_arrow::PyRecordBatchReader;
 
-/// The core's version, then the version of each AWS SDK crate it links.
+/// The core version, then the Athena and S3 SDK versions.
 #[pyfunction]
 #[pyo3(name = "_core_versions")]
 fn core_versions() -> Vec<String> {

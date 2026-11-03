@@ -3,9 +3,8 @@
 #' 64-bit integer columns come back as `bit64::integer64` so values past 2^53 stay exact.
 #' @noRd
 arrow_probe <- function() {
-  stream <- nanoarrow::nanoarrow_allocate_array_stream()
-  arrow_probe_into(nanoarrow::nanoarrow_pointer_addr_chr(stream))
-  schema <- stream$get_schema()
+  stream <- arrow_probe_stream()
+  schema <- nanoarrow::infer_nanoarrow_schema(stream)
   ptype <- nanoarrow::infer_nanoarrow_ptype(schema)
   is_int64 <- vapply(schema$children, function(field) field$format == "l", logical(1))
   ptype[is_int64] <- lapply(ptype[is_int64], function(x) bit64::integer64())

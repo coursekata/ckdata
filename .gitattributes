@@ -1,0 +1,6 @@
+# Keep upstream legal text byte-for-byte; check-licenses.py verifies its hashes.
+python/THIRD_PARTY_NOTICES.txt -whitespace
+python/RUST_RUNTIME_NOTICES.html -whitespace
+r/inst/THIRD_PARTY_NOTICES.txt -whitespace
+r/inst/RUST_RUNTIME_NOTICES.html -whitespace
+scripts/licenses/upstream/* -whitespace

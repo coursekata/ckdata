@@ -1,6 +1,6 @@
 name: release
 
-# A v* tag on main releases the R package. The tag must name the version all three manifests carry,
+# A v* tag on main releases the R package. The tag must name the version all four manifests carry,
 # and the GitHub release created here is what R-universe builds from, through "branch": "*release"
 # in the registry; verify then installs what R-universe built. Wheels and PyPI arrive with the
 # Python package.
@@ -11,13 +11,42 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    env:
+      # Enable only after the public R query API and distribution acceptance pass.
+      R_RELEASE_READY: "false"
+    steps:
+      - name: Require first-release readiness
+        run: |
+          if [ "$R_RELEASE_READY" != true ]; then
+            echo "::error::R publication is disabled until query bindings and distribution acceptance are complete."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require successful CI for the exact tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tagged_commit=$(git rev-parse HEAD)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$tagged_commit&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | select(.head_branch == "main") | .head_sha' > "$RUNNER_TEMP/passed-ci-commits"
+          if ! grep -Fxq "$tagged_commit" "$RUNNER_TEMP/passed-ci-commits"; then
+            echo "::error::The tagged commit has no successful main-branch CI run."
+            exit 1
+          fi
+
   version:
+    needs: readiness
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,8 +60,9 @@ jobs:
           core=$(sed -n 's/^version = "\(.*\)"$/\1/p' core/Cargo.toml | head -n 1)
           py=$(sed -n 's/^version = "\(.*\)"$/\1/p' python/Cargo.toml | head -n 1)
           r=$(sed -n 's/^Version: //p' r/DESCRIPTION)
-          echo "tag $want, core $core, Python $py, R $r"
-          if [ "$core" != "$want" ] || [ "$py" != "$want" ] || [ "$r" != "$want" ]; then
+          r_crate=$(python3 -c 'import tomllib; print(tomllib.load(open("r/src/rust/Cargo.toml", "rb"))["package"]["version"])')
+          echo "tag $want, core $core, Python $py, R $r, R crate $r_crate"
+          if [ "$core" != "$want" ] || [ "$py" != "$want" ] || [ "$r" != "$want" ] || [ "$r_crate" != "$want" ]; then
             echo "::error::$GITHUB_REF_NAME does not match the manifests' versions"
             exit 1
           fi
@@ -56,6 +86,6 @@ jobs:
   # is called here rather than triggered by the release.
   verify:
     needs: github-release
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify_release.yml
     with:
       version: ${{ github.ref_name }}

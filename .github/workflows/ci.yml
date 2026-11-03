@@ -11,6 +11,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   quality:
-    uses: coursekata/ck-ci/.github/workflows/quality.yml@v0.2.1
+    uses: coursekata/ck-ci/.github/workflows/quality.yml@7b7d7a59556b4c15d4f15c9d6fd2723419a5dd19 # v0.2.1
 
   hooks:
     timeout-minutes: 15
@@ -34,6 +35,15 @@ jobs:
       - name: Install rustfmt
         run: rustup toolchain install stable --profile minimal --component rustfmt
 
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Run fast Python tests
+        env:
+          AWS_CONFIG_FILE: /dev/null
+          AWS_SHARED_CREDENTIALS_FILE: /dev/null
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          uv run --locked pytest tests/unit
+
       - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         env:
           # quality scans the whole history for secrets.
@@ -41,6 +51,37 @@ jobs:
         with:
           prek-version: "0.5.9"
           extra-args: --all-files
+
+      - name: Capture the existing Renovate validator dependency graph
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-inventory"
+          touch "$RUNNER_TEMP/npm-inventory/user.npmrc" "$RUNNER_TEMP/npm-inventory/global.npmrc"
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npm-inventory/user.npmrc"
+          export NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/npm-inventory/global.npmrc"
+          export NPM_CONFIG_CACHE="$RUNNER_TEMP/npm-inventory/cache"
+          npm_root=$(prek exec renovate-config-validator -- npm root --global)
+          set +e
+          prek exec renovate-config-validator -- npm ls --all --json --prefix "$npm_root/renovate" \
+            > "$RUNNER_TEMP/renovate-tree.json"
+          status=$?
+          set -e
+          # The report retains ELSPROBLEMS and every existing version. Other failures are fatal.
+          if [ "$status" -gt 1 ]; then exit "$status"; fi
+      - name: Retain informational Rust and complete Node tooling advisories
+        run: |
+          uv run --locked python -m scripts.audit_dependencies scan \
+            --npm-tree "$RUNNER_TEMP/renovate-tree.json" \
+            --output "$RUNNER_TEMP/dependency-osv-npm.json" \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dependency-osv-npm-inventory
+          path: |
+            ${{ runner.temp }}/dependency-osv-npm.json
+            ${{ runner.temp }}/renovate-tree.json
+          if-no-files-found: error
+          retention-days: 30
 
   rust:
     timeout-minutes: 30
@@ -70,7 +111,95 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       # The binding has no Rust tests, and its test binary would need libpython to link.
-      - run: cargo test --workspace --locked --exclude ckdata-py
+      - run: cargo test --workspace --all-targets --locked --exclude ckdata-py
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+      - name: Test the compiled Python binding
+        run: uv run --locked --group bindings --all-packages pytest python/tests
+
+      - name: Verify locked Cargo license notices
+        run: |
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
+          python3 scripts/check_licenses.py
+
+  rust-minimum:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install R for the binding check
+        uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+        with:
+          r-version: release
+          use-public-rspm: true
+      - name: Install the declared minimum Rust version
+        id: minimum
+        run: |
+          minimum=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' core/Cargo.toml)
+          rustup toolchain install "$minimum" --profile minimal
+          echo "version=$minimum" >> "$GITHUB_OUTPUT"
+          toolchain_key=$({ rustc +"$minimum" -vV; printf '%s\n' "${ImageOS:-}" "${ImageVersion:-}"; } | sha256sum | cut -d ' ' -f 1)
+          echo "key=$toolchain_key" >> "$GITHUB_OUTPUT"
+      - name: Cache the minimum toolchain build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-msrv-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.minimum.outputs.key }}-${{ hashFiles('Cargo.lock', 'r/src/rust/Cargo.lock', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.toml') }}
+      - name: Check both workspaces at the declared minimum
+        env:
+          MINIMUM_RUST: ${{ steps.minimum.outputs.version }}
+        run: |
+          cargo +"$MINIMUM_RUST" check --workspace --all-targets --locked
+          cargo +"$MINIMUM_RUST" check --manifest-path r/src/rust/Cargo.toml --locked
+
+  dependency-inventory:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        env:
+          TRIVY_VERSION: v0.76.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+      - name: Export every development lock record for scanning
+        run: python3 -m scripts.audit_dependencies export --output "$RUNNER_TEMP/dependency-inventory"
+      - name: Inventory all severities, including unfixed advisories
+        run: |
+          trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+            --include-dev-deps --ignore-unfixed=false --ignorefile '' --config '' \
+            --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
+            --format json --output "$RUNNER_TEMP/dependency-inventory.json" \
+            "$RUNNER_TEMP/dependency-inventory"
+          python3 -m scripts.audit_dependencies verify "$RUNNER_TEMP/dependency-inventory.json"
+          {
+            echo '### Dependency advisory inventory'
+            echo 'Fixed HIGH/CRITICAL findings fail this job. The retained inventory includes every severity and unfixed finding.'
+            jq -r '.Results[] | .Vulnerabilities[]? | "- \(.Severity): \(.PkgName) \(.InstalledVersion), \(.VulnerabilityID), fix: \(.FixedVersion // "unreleased")"' "$RUNNER_TEMP/dependency-inventory.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+          trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
+            --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress \
+            "$RUNNER_TEMP/dependency-inventory"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dependency-advisory-inventory
+          path: ${{ runner.temp }}/dependency-inventory.json
+          if-no-files-found: error
+          retention-days: 30
 
   r-source:
     timeout-minutes: 15
@@ -84,17 +213,19 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Install Rust for the cache smoke test
+      - name: Install Rust for build integration tests
         run: rustup toolchain install stable --profile minimal
 
-      - name: Check R's Cargo cache and cleanup
-        run: python3 scripts/check-r-cargo-cache.py
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Run R build integration tests
+        run: uv run --locked pytest tests/integration
 
       - name: Build the source tarball
         run: R CMD build r
 
       - name: Check the tarball carries the core
-        run: scripts/check-r-tarball.sh ckdata_*.tar.gz
+        run: python3 -m scripts.check_r_tarball ckdata_*.tar.gz
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -105,8 +236,8 @@ jobs:
 
   r:
     name: r (${{ matrix.os }}, R ${{ matrix.r }})
-    # Fail the inexpensive checks before starting four native R builds.
-    needs: [quality, hooks, rust, r-source]
+    # Fail the inexpensive checks before starting native R builds.
+    needs: [quality, hooks, rust, rust-minimum, dependency-inventory, r-source]
     timeout-minutes: 45
     runs-on: ${{ matrix.os }}
     strategy:
@@ -115,6 +246,7 @@ jobs:
         include:
           - { os: ubuntu-latest, r: release }
           - { os: ubuntu-latest, r: oldrel-1 }
+          - { os: ubuntu-latest, r: "4.2" }
           - { os: macos-latest, r: release }
           - { os: windows-latest, r: release }
     steps:
@@ -178,7 +310,7 @@ jobs:
   # this asserts success itself.
   ci-passed:
     if: always()
-    needs: [quality, hooks, rust, r-source, r]
+    needs: [quality, hooks, rust, rust-minimum, dependency-inventory, r-source, r]
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:

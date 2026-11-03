@@ -3,6 +3,7 @@ name = "ckdata-py"
 version = "0.0.1"
 edition = "2024"
 publish = false
+license = "MIT"
 
 [lib]
 name = "ckdata_py"

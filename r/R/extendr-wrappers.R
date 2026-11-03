@@ -5,12 +5,12 @@
 #' @useDynLib ckdata, .registration = TRUE
 NULL
 
-#' The core's version, then the version of each AWS SDK crate it links.
+#' The core version, then the Athena and S3 SDK versions.
 #' @noRd
 core_versions <- function() .Call(wrap__core_versions)
 
-#' Fill an empty nanoarrow stream, given its address, with the core's literal probe.
+#' Create an owned nanoarrow stream containing the core's literal probe.
 #' @noRd
-arrow_probe_into <- function(address) .Call(wrap__arrow_probe_into, address)
+arrow_probe_stream <- function() .Call(wrap__arrow_probe_stream)
 
 # nolint end

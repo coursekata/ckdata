@@ -1,0 +1,23 @@
+[project]
+name = "ckdata-development"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+[dependency-groups]
+dev = ["pytest>=9,<10", "boto3>=1.40,<2", "pyarrow>=26,<27"]
+bindings = ["maturin>=1.15,<2", "polars", "pandas", "duckdb"]
+
+[tool.uv]
+# This root configures development; python/ remains the distributable package.
+package = false
+exclude-newer = "7 days"
+# Native sources need rebuilding when the optional binding is selected.
+reinstall-package = ["ckdata"]
+
+[tool.uv.workspace]
+members = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"

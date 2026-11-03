@@ -1,0 +1,77 @@
+{
+  "base64-simd@0.8.0": {
+    "files": [
+      {
+        "file": "upstream/simd-LICENSE",
+        "sha256": "14e66de892a0e218a4d60b2cc41a17a28080c46621d812fa2471983d8c524748",
+        "url": "https://github.com/Nugine/simd/blob/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE"
+      }
+    ],
+    "revision": "d74c030d9dc4f3cae02146d1f497ff62726ef09a"
+  },
+  "extendr-api@0.9.0": {
+    "files": [
+      {
+        "file": "upstream/extendr-api-LICENSE",
+        "sha256": "fb9c2cccbdcb61ea51e0d553a6474297031544104985279c5c32d25c5c99977e",
+        "url": "https://github.com/extendr/extendr/blob/564d0de80ba6cff3f8c04e3b3e336d1346590ec6/LICENSE"
+      }
+    ],
+    "revision": "564d0de80ba6cff3f8c04e3b3e336d1346590ec6"
+  },
+  "extendr-ffi@0.9.0": {
+    "files": [
+      {
+        "file": "upstream/extendr-ffi-LICENSE",
+        "sha256": "fb9c2cccbdcb61ea51e0d553a6474297031544104985279c5c32d25c5c99977e",
+        "url": "https://github.com/extendr/extendr/blob/4848773321e9905f0426d12878b0c212085d4814/LICENSE"
+      }
+    ],
+    "revision": "4848773321e9905f0426d12878b0c212085d4814"
+  },
+  "extendr-macros@0.9.0": {
+    "files": [
+      {
+        "file": "upstream/extendr-ffi-LICENSE",
+        "sha256": "fb9c2cccbdcb61ea51e0d553a6474297031544104985279c5c32d25c5c99977e",
+        "url": "https://github.com/extendr/extendr/blob/4848773321e9905f0426d12878b0c212085d4814/LICENSE"
+      }
+    ],
+    "revision": "4848773321e9905f0426d12878b0c212085d4814"
+  },
+  "flatbuffers@25.12.19": {
+    "files": [
+      {
+        "file": "upstream/flatbuffers-LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "url": "https://github.com/google/flatbuffers/blob/7e163021e59cca4f8e1e35a7c828b5c6b7915953/LICENSE"
+      }
+    ],
+    "revision": "7e163021e59cca4f8e1e35a7c828b5c6b7915953"
+  },
+  "pyo3-arrow@0.20.0": {
+    "files": [
+      {
+        "file": "upstream/pyo3-arrow-LICENSE_MIT",
+        "sha256": "a429abe835dbbe9227152b9af6116337bb2609ed15947e3288221abf939b278e",
+        "url": "https://github.com/kylebarron/arro3/blob/ca284a4c75834ae04d7874ccad699e0fecc3dfbb/LICENSE_MIT"
+      },
+      {
+        "file": "upstream/pyo3-arrow-LICENSE_APACHE",
+        "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+        "url": "https://github.com/kylebarron/arro3/blob/ca284a4c75834ae04d7874ccad699e0fecc3dfbb/LICENSE_APACHE"
+      }
+    ],
+    "revision": "ca284a4c75834ae04d7874ccad699e0fecc3dfbb"
+  },
+  "vsimd@0.8.0": {
+    "files": [
+      {
+        "file": "upstream/simd-LICENSE",
+        "sha256": "14e66de892a0e218a4d60b2cc41a17a28080c46621d812fa2471983d8c524748",
+        "url": "https://github.com/Nugine/simd/blob/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE"
+      }
+    ],
+    "revision": "d74c030d9dc4f3cae02146d1f497ff62726ef09a"
+  }
+}
