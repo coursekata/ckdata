@@ -68,7 +68,7 @@ dependencies are outside this Cargo inventory.
 License, copyright, AUTHORS and NOTICE files are reproduced below. Source-file
 copyright/license preambles are also preserved. Identical texts share a SHA-256
 reference. Upstream snapshots supply files omitted from published crate archives.
-Refresh or verify with: python3 scripts/check-licenses.py [--write]
+Refresh or verify with: python3 scripts/check_licenses.py [--write]
 """.replace("\n their", "\ntheir")
 
 
@@ -378,7 +378,7 @@ def runtime_notices():
 def expected_files():
     supplements = json.loads(SUPPLEMENTS.read_text())
     owned = (ROOT / "LICENSE").read_bytes()
-    record = json.loads((SUPPLEMENTS.parent / "rust-runtime.json").read_text())
+    record = json.loads((SUPPLEMENTS.parent / "rust_runtime.json").read_text())
     runtime = (ROOT / "python/RUST_RUNTIME_NOTICES.html").read_bytes()
     if digest(runtime) != record["notice_sha256"]:
         raise ValueError(
@@ -480,7 +480,7 @@ def main():
     args = parser.parse_args()
     if args.runtime_write or args.runtime_check:
         record, runtime = runtime_notices()
-        record_path = SUPPLEMENTS.parent / "rust-runtime.json"
+        record_path = SUPPLEMENTS.parent / "rust_runtime.json"
         if args.runtime_write:
             record_path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
             for name in (
@@ -502,7 +502,7 @@ def main():
             path.write_bytes(content)
         elif not path.is_file() or path.read_bytes() != content:
             raise ValueError(
-                f"Stale {name}; run python3 scripts/check-licenses.py --write"
+                f"Stale {name}; run python3 scripts/check_licenses.py --write"
             )
     for path in args.archive:
         check_archive(path, expected)

@@ -8,7 +8,6 @@
     "cargo",
     "pep621",
     "pre-commit",
-    "pep723",
     "custom.regex"
   ],
   "packageRules": [
@@ -20,20 +19,8 @@
         "pyo3-arrow"
       ],
       "groupName": "Arrow"
-    },
-    {
-      "description": "Inline dependencies follow the shared release-age policy; the script-lock workflow refreshes their uv lock monthly and on metadata changes.",
-      "matchManagers": [
-        "pep723"
-      ],
-      "rangeStrategy": "pin"
     }
   ],
-  "pep723": {
-    "managerFilePatterns": [
-      "/^scripts/query-integration/check\\.py$/"
-    ]
-  },
   "customManagers": [
     {
       "customType": "regex",
@@ -57,5 +44,11 @@
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "j178/prek"
     }
-  ]
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 4am on the first day of the month"
+    ]
+  }
 }

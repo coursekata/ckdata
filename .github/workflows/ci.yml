@@ -36,15 +36,13 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - name: Check the synthetic query harness offline
+      - name: Run fast Python tests
         env:
           AWS_CONFIG_FILE: /dev/null
           AWS_SHARED_CREDENTIALS_FILE: /dev/null
           AWS_EC2_METADATA_DISABLED: "true"
         run: |
-          python3 -m unittest discover -s scripts -p 'test_*.py'
-          python3 -m unittest discover -s scripts/query-integration -p 'test_*.py'
-          uv run --locked scripts/query-integration/check.py --self-test
+          uv run --locked pytest tests/unit
 
       - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         env:
@@ -71,7 +69,7 @@ jobs:
           if [ "$status" -gt 1 ]; then exit "$status"; fi
       - name: Retain informational Rust and complete Node tooling advisories
         run: |
-          python3 scripts/query-integration/audit-advisories.py \
+          uv run --locked python -m scripts.audit_dependencies scan \
             --npm-tree "$RUNNER_TEMP/renovate-tree.json" \
             --output "$RUNNER_TEMP/dependency-osv-npm.json" \
             --summary "$GITHUB_STEP_SUMMARY"
@@ -115,11 +113,17 @@ jobs:
       # The binding has no Rust tests, and its test binary would need libpython to link.
       - run: cargo test --workspace --all-targets --locked --exclude ckdata-py
 
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+      - name: Test the compiled Python binding
+        run: uv run --locked --group bindings --all-packages pytest python/tests
+
       - name: Verify locked Cargo license notices
         run: |
           cargo fetch --locked
           cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
-          python3 scripts/check-licenses.py
+          python3 scripts/check_licenses.py
 
   rust-minimum:
     timeout-minutes: 15
@@ -166,8 +170,8 @@ jobs:
           TRIVY_VERSION: v0.76.1
         with:
           version: ${{ env.TRIVY_VERSION }}
-      - name: Normalize the script lock, including every development dependency
-        run: python3 scripts/query-integration/audit-lock.py --output "$RUNNER_TEMP/dependency-inventory"
+      - name: Export every development lock record for scanning
+        run: python3 -m scripts.audit_dependencies export --output "$RUNNER_TEMP/dependency-inventory"
       - name: Inventory all severities, including unfixed advisories
         run: |
           trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
@@ -175,12 +179,15 @@ jobs:
             --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
             --format json --output "$RUNNER_TEMP/dependency-inventory.json" \
             "$RUNNER_TEMP/dependency-inventory"
-          python3 scripts/query-integration/audit-lock.py --verify "$RUNNER_TEMP/dependency-inventory.json"
+          python3 -m scripts.audit_dependencies verify "$RUNNER_TEMP/dependency-inventory.json"
           {
             echo '### Dependency advisory inventory'
-            echo 'The fixed HIGH/CRITICAL merge gate runs in quality. This inventory retains all severities and unfixed findings for review.'
+            echo 'Fixed HIGH/CRITICAL findings fail this job. The retained inventory includes every severity and unfixed finding.'
             jq -r '.Results[] | .Vulnerabilities[]? | "- \(.Severity): \(.PkgName) \(.InstalledVersion), \(.VulnerabilityID), fix: \(.FixedVersion // "unreleased")"' "$RUNNER_TEMP/dependency-inventory.json"
           } >> "$GITHUB_STEP_SUMMARY"
+          trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
+            --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress \
+            "$RUNNER_TEMP/dependency-inventory"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -201,17 +208,19 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Install Rust for the cache smoke test
+      - name: Install Rust for build integration tests
         run: rustup toolchain install stable --profile minimal
 
-      - name: Check R's Cargo cache and cleanup
-        run: python3 scripts/check-r-cargo-cache.py
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Run R build integration tests
+        run: uv run --locked pytest tests/integration
 
       - name: Build the source tarball
         run: R CMD build r
 
       - name: Check the tarball carries the core
-        run: scripts/check-r-tarball.sh ckdata_*.tar.gz
+        run: python3 -m scripts.check_r_tarball ckdata_*.tar.gz
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

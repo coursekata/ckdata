@@ -29,7 +29,7 @@ uv tool install prek==0.5.9
 prek install
 ```
 
-The hooks check formatting on commits and run Clippy and all Rust targets on pushes, including dependency-only changes. CI repeats these checks. [Dependency maintenance](.github/dependency-policy.md) records update ownership and upstream constraints.
+The hooks check formatting on commits and run Clippy and all Rust targets on pushes, including dependency-only changes. CI repeats these checks. [Dependency maintenance](.github/dependency_policy.md) records update ownership and upstream constraints.
 
 ```sh
 cargo test --workspace --all-targets --locked --exclude ckdata-py
@@ -41,25 +41,34 @@ Rscript -e 'devtools::test("r")'
 
 `Rscript -e 'devtools::document("r")'` regenerates R documentation and wrappers after an exported function changes.
 
-The [query integration harness](scripts/query-integration/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. The Rust acceptance example runs the implemented reader through both test roles. Its help and ordinary Rust tests are offline; live checks require an explicit flag and the deployment contract from ck-datalake's `environments/ckdata-test` root.
+The [query integration harness](tests/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. The Rust acceptance example runs the implemented reader through both test roles. Its help and ordinary Rust tests are offline; live checks require an explicit flag and the deployment contract from ck-datalake's `environments/ckdata-test` root.
 
 ```sh
-cargo run -p ckdata --example query-acceptance -- --help
-cargo run -p ckdata --example query-acceptance -- \
+cargo run -p ckdata --example query_acceptance -- --help
+cargo run -p ckdata --example query_acceptance -- \
   --deployment /absolute/path/to/ckdata-test-deployment.json --run-live
 ```
 
 AWS profiles and region follow standard SDK configuration; `--profile` selects a source profile. The core's `Connection::query` accepts SQL, `QueryOptions` and a `QueryCancellation` token, and returns owned Arrow batches through `QueryResult`. Signal cancellation and keep awaiting the query so the client can request a remote stop. The library installs no global Ctrl-C handler.
 
+The repository has one Python development environment, declared in `pyproject.toml`
+and resolved in `uv.lock`. It covers tooling, the AWS probe and Python binding
+tests. uv creates the environment without an activation step.
+
 ```sh
-uv venv --python 3.11
-source .venv/bin/activate
-uv pip install --group python/pyproject.toml:test 'maturin>=1.15,<2'
-maturin develop --manifest-path python/Cargo.toml --locked
-pytest python/tests
+uv sync --locked
+uv run --locked pytest
 ```
 
-On PowerShell, activate with `.venv\Scripts\Activate.ps1` instead of `source`. The other commands use the same repository-root paths.
+This runs every Python tooling test under `tests/`, including the small R build
+fixtures. Run `uv run --locked pytest tests/unit` for the fast checks without R
+or a Rust build. [Testing](tests/README.md) describes the layout and live probe.
+
+To build the Python binding and run its handoff tests in the same environment:
+
+```sh
+uv run --locked --group bindings --all-packages pytest python/tests
+```
 
 On Windows, git checks the core's symlink out as a text file unless symlinks are enabled. Turn on Developer Mode, then clone with `git clone -c core.symlinks=true`.
 
@@ -70,13 +79,13 @@ Publish the first R release only after its query API works and its package tests
 1. In one pull request, set the new version in `core/Cargo.toml`, `python/Cargo.toml`, `r/src/rust/Cargo.toml` and `r/DESCRIPTION`, and merge it.
 2. Tag the merge commit with a lightweight tag and push it: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
 3. The release workflow checks that the tag matches all four versions and sits on `main`, then creates the GitHub release.
-4. R-universe builds the R binaries from that release. The release workflow waits for them, then installs each on Linux, macOS and Windows with no Rust present and runs the package's tests. `verify-release` runs that check again by hand.
+4. R-universe builds the R binaries from that release. The release workflow waits for them, then installs each on Linux, macOS and Windows with no Rust present and runs the package's tests. `verify_release` runs that check again by hand.
 
 A release tag is never moved. A fix is a new version.
 
 License notices ship with both packages. After changing a Cargo lock, run
-`python3 scripts/check-licenses.py --write`; CI rejects stale notices. Before
+`python3 scripts/check_licenses.py --write`; CI rejects stale notices. Before
 building a release with a different Rust compiler, run
-`python3 scripts/check-licenses.py --runtime-write --write` and review the
+`python3 scripts/check_licenses.py --runtime-write --write` and review the
 compiler provenance and license diff. `--archive /absolute/path/to/package`
 checks the exact notices carried by a wheel, Python source archive or R tarball.

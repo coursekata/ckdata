@@ -1,12 +1,50 @@
-# Synthetic query integration checks
+# Tests
 
 These developer harnesses use the reusable fixture environment owned by `coursekata/ck-datalake`, under `environments/ckdata-test`. The environment contains only invented rows and test-scoped identities. The Rust example exercises the implemented reader; the Python probe provides an independent transport comparison.
+
+## Layout and commands
+
+Python checks use pytest and `test_*.py` filenames. Maintained Python and Rust
+source filenames use `snake_case`. Tests live under `tests/`; developer commands
+live under `scripts/`. R's generated wrappers, configure entry points and other
+framework-owned files retain their required names.
+
+- `tests/unit/`: audit reporting, release guards, archive/license checks and the
+  query probe with fake services. No network, AWS credentials, R or native build.
+- `tests/integration/`: small R/Cargo build fixtures, including cache ownership,
+  spaces in paths, failure cleanup and simulated Windows recipes. Requires R,
+  Cargo and make; uses no AWS services.
+- `python/tests/`: compiled binding handoffs to frame libraries. Requires the
+  optional `bindings` dependency group and the native package.
+- `core/` and `r/tests/testthat/`: native Rust and R tests use their language's
+  standard runners, Cargo and testthat.
+
+From the repository root:
+
+```sh
+uv run --locked pytest                         # all developer-tool tests
+uv run --locked pytest tests/unit              # fast tests
+uv run --locked pytest tests/integration       # R build integration tests
+uv run --locked --group bindings --all-packages pytest python/tests
+cargo test --workspace --all-targets --locked --exclude ckdata-py
+Rscript -e 'devtools::test("r")'
+```
+
+`uv.lock` pins the shared Python development environment, across both dependency
+groups and supported Python/platform branches. It does not belong to an individual
+test and is not installed with either public package. The binding command forces its editable rebuild so changed Rust sources are
+compiled before testing. Cargo still reuses unchanged dependencies. The two Cargo locks remain
+separate because the R source package carries an independently buildable crate.
+
+CI runs the fast tests before expensive native package checks and runs the R
+build tests in the job that installs R. No test runs on import. All live AWS
+access is confined to the explicit command below.
 
 ## Rust acceptance
 
 ```sh
-cargo run -p ckdata --example query-acceptance -- --help
-cargo run -p ckdata --example query-acceptance -- \
+cargo run -p ckdata --example query_acceptance -- --help
+cargo run -p ckdata --example query_acceptance -- \
   --deployment /absolute/path/to/ckdata-test-deployment.json \
   --profile YOUR_OPERATOR_PROFILE --run-live
 ```
@@ -26,7 +64,7 @@ Query results are bounded collections. Defaults are 1 MiB of manifest data, 256 
 Obtain the environment's nonsecret deployment contract with `tofu output -json ckdata_test` from its own infrastructure state. Keep the resulting file outside Git. Using a standard AWS session for an operator admitted by that environment:
 
 ```sh
-uv run --locked scripts/query-integration/check.py --run-live \
+uv run --locked python -m scripts.query_probe --run-live \
   --deployment /absolute/path/to/ckdata-test-deployment.json
 ```
 
@@ -36,13 +74,14 @@ For each seat it checks literal types, an empty query and the named invented Par
 
 Three bounded UNLOAD queries run per seat. Athena writes fresh outputs under that seat's test prefix; the environment expires them after three days. The harness has no deletion or infrastructure permissions. Its unwrapped zero-row query records a manifest with no files and no Parquet schema; the Rust reader uses the presence-column strategy described above.
 
-Run the same transport and safety checks with fake services, without constructing AWS clients:
+Run the same transport and safety checks with fake services:
 
 ```sh
-uv run --locked scripts/query-integration/check.py --self-test
+uv run --locked pytest tests/unit/test_query_probe.py
 ```
 
-CI runs only this offline mode. Real internal/enclave-role checks and actual one-hour expiry remain final BB-6315 acceptance after the Rust query path works. This harness deliberately cannot run against those production roles.
+Real internal/enclave-role checks and actual one-hour expiry remain final
+BB-6315 acceptance. The Python probe cannot run against those production roles.
 
 The synthetic deployment contract is fixed to `us-west-2`, the generated fixture
 namespace, and both seat identities. Before submitting a query, each harness checks
@@ -50,19 +89,16 @@ the live workgroup's exact output prefix, expected bucket owner, SSE-S3 encrypti
 enforced configuration, Athena engine 3, and 10 MiB scan cutoff. Operator roles may
 belong to another account when their exact IAM ARNs are admitted by the contract.
 
-Renovate's PEP 723 manager updates the inline requirements in `check.py`. Its hosted
-manager does not refresh script locks. The `script-lock` workflow proposes a monthly
-lock update within those requirements, excluding packages uploaded in the last seven
-days; you can also run it manually. An inline requirement change needs a matching
-`uv lock --script scripts/query-integration/check.py` update before CI can pass.
-Workflow-token pull requests need a manual `ci` run on their branch before merging.
+Renovate maintains the normal `pyproject.toml` declarations and shared `uv.lock`,
+including monthly lock maintenance. The seven-day wait is enforced by
+`tool.uv.exclude-newer`; no custom lock-update workflow is needed. To refresh
+manually, run `uv lock --upgrade`, then `uv run --locked pytest`.
 
-CI converts every `check.py.lock` package into a scanner-only requirements inventory,
-including dependencies that Trivy's uv parser treats as development dependencies.
-It verifies that the report includes every locked package. The retained JSON report
-and job summary include all advisory severities and unfixed findings; the shared
-quality workflow retains its fixed HIGH/CRITICAL merge gate. This inventory does not
-install packages or replace the lockfile.
+CI exports every public Python lock record, including optional groups and platform
+branches, into a scanner-only inventory alongside both Cargo locks. The scanner's
+coverage is verified. All severities and unfixed advisories remain in the retained
+report; fixed HIGH/CRITICAL advisories fail the merge gate. This export is never
+used as an installation requirements file.
 
 Both harnesses accept millisecond, microsecond and nanosecond Arrow storage for
 naive timestamps and require the exact expected instant. Athena INT96 output can

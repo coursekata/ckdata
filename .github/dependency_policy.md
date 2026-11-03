@@ -1,10 +1,10 @@
 # Dependency maintenance
 
-The repository owner listed in [CODEOWNERS](CODEOWNERS) reviews dependency findings. Review the complete inventory on dependency pull requests, before a release, and during the monthly script-lock refresh. Recheck the deferred items below by 2026-12-01, or sooner when a parent package releases, an advisory changes, or the affected feature becomes reachable from untrusted input.
+The repository owner listed in [CODEOWNERS](CODEOWNERS) reviews dependency findings. Review the complete inventory on dependency pull requests, before a release, and during the monthly lock maintenance. Recheck the deferred items below by 2026-12-01, or sooner when a parent package releases, an advisory changes, or the affected feature becomes reachable from untrusted input.
 
 The shared quality workflow gates fixed HIGH/CRITICAL findings. The repository inventory retains UNKNOWN, LOW and MEDIUM findings, unfixed advisories, and development dependencies. OSV also reports Rust maintenance advisories that Trivy's vulnerability database may omit. No severity or fix filter belongs in the inventory. A clean Trivy result alone is insufficient to close a maintenance finding.
 
-Run `scripts/query-integration/audit-advisories.py --output <report.json>` alongside the Trivy inventory. It reads only `Cargo.lock`, `r/src/rust/Cargo.lock`, and `scripts/query-integration/check.py.lock`; it sends public registry package names and versions to [OSV](https://google.github.io/osv.dev/post-v1-querybatch/). Its report preserves the full advisory records and exits unsuccessfully if the remote response is incomplete. Retain the JSON as a CI artifact and append the summary to the job summary. An unavailable advisory service is a failed inventory, not a clean result.
+Run `uv run --locked python -m scripts.audit_dependencies scan --output <report.json>` alongside the Trivy inventory. It reads only `Cargo.lock`, `r/src/rust/Cargo.lock`, and `uv.lock`; it sends public registry package names and versions to [OSV](https://google.github.io/osv.dev/post-v1-querybatch/). Its report preserves the full advisory records and exits unsuccessfully if the remote response is incomplete. Retain the JSON as a CI artifact and append the summary to the job summary. An unavailable advisory service is a failed inventory, not a clean result.
 
 The Renovate validator also has an npm dependency graph even though this repository has no npm application. After the configured hook environment has been prepared, capture its existing graph with `npm ls --all --json` and pass the JSON through `--npm-tree`. The helper queries [npm's bulk advisory endpoint](https://docs.npmjs.com/cli/v11/commands/npm-audit/#bulk-advisory-endpoint) for every installed version. Keep `npm ls` tree errors in the report. Missing development dependencies in the published tool do not authorize an install or a cleanliness claim. This is an installed-version advisory inventory; npm's metavulnerability totals are not calculated. A run without `--npm-tree` explicitly reports that Node tooling was not audited.
 
@@ -37,17 +37,36 @@ done
 
 `generic-array 0.14.9` looks compatible by its own version range, but `crypto-common 0.1.7` requires `generic-array =0.14.7` exactly. A targeted update to 0.14.9 fails in both workspaces. Retain 0.14.7 until a parent release changes that requirement; do not hand-edit either lock. The 1.4.5 line is a separate breaking upgrade.
 
-The seven-day wait is configured in the script metadata so locked execution uses the same resolver policy. The query harness runs independently of the binding. Its PyArrow 26 upgrade uses `pyarrow>=26,<27`, supports the harness's declared Python 3.11 minimum, and passes the offline synthetic self-test. Refresh and test its lock with:
+The shared Python development environment is declared in root `pyproject.toml`
+and pinned in `uv.lock`. The default group covers pytest, boto3 and PyArrow;
+`bindings` adds the native build and frame-library tools. The Python package
+metadata remains under `python/`. No test or probe has a separate lockfile.
+The workspace's `tool.uv.exclude-newer` enforces a seven-day wait during ordinary
+updates and lock maintenance. Refresh with:
 
 ```sh
-uv lock --script scripts/query-integration/check.py --upgrade --exclude-newer '7 days' --no-build
-AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_EC2_METADATA_DISABLED=true \
-  uv run --locked scripts/query-integration/check.py --self-test
+uv lock --upgrade
+uv run --locked pytest
+uv run --locked --group bindings --all-packages pytest python/tests
 ```
 
-`python-dateutil 4.0.0` remains blocked by botocore's `python-dateutil>=2.1,<3.0.0` requirement. Keep the latest allowed 2.9.0.post0 until a compatible botocore release changes it. boto3/botocore and the other script-lock packages were current at this review. Renovate's PEP 723 manager tracks the inline requirements; the monthly script-lock workflow refreshes their resolution.
+Renovate's PEP621 manager supports the shared uv workspace lock and monthly
+lock maintenance. The former custom script-lock updater has been removed;
+[Renovate's standard support](https://docs.renovatebot.com/modules/manager/pep621/)
+owns Python dependency and lock refreshes. `python-dateutil 4.0.0` remains blocked
+by botocore's `python-dateutil>=2.1,<3.0.0` requirement. No forced override is used.
 
-The Python build/test and R package environments are unpinned. A lock audit does not establish their installed transitive graph. Before a release, retain the versions from the actual tested environments (`python -m pip freeze` and R `sessionInfo()`), audit that Python graph, and include R dependency versions in the check evidence. Review CRAN versions for bit64, nanoarrow, tibble and testthat monthly; Renovate has no native CRAN manager. `RoxygenNote` records the generator used, rather than imposing an install constraint. Regenerate documentation with roxygen2 8.1.1 when documentation is next changed and review the generated diff. Build/test Python declarations permit the current maturin, pytest, polars, PyArrow, pandas and duckdb releases; test their supported Python range when updating them.
+The dependency inventory covers every public registry version in both Cargo
+locks and `uv.lock`, including optional development groups and platform branches.
+Scanner coverage is verified; fixed HIGH/CRITICAL findings fail CI. Informational,
+low, moderate and unfixed advisories remain visible for owner review.
+
+R package dependencies and isolated Python build-backend resolution are not
+represented as locked by `uv.lock`. Retain R `sessionInfo()` and actual package
+build/test versions in release evidence. Review CRAN versions for bit64,
+nanoarrow, tibble and testthat monthly; Renovate has no native CRAN manager.
+`RoxygenNote` records the generator used rather than an install constraint.
+Regenerate documentation with roxygen2 8.1.1 when documentation next changes.
 
 ## Upgrades constrained by current parents
 

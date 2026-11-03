@@ -86,6 +86,6 @@ jobs:
   # is called here rather than triggered by the release.
   verify:
     needs: github-release
-    uses: ./.github/workflows/verify-release.yml
+    uses: ./.github/workflows/verify_release.yml
     with:
       version: ${{ github.ref_name }}

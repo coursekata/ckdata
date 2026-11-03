@@ -1,4 +1,4 @@
-"""Report every OSV advisory in the two Rust locks and the query script lock.
+"""Report every OSV advisory in the two Cargo locks and shared Python development lock.
 
 Optionally query npm's bulk endpoint for an existing Renovate hook tree captured
 with npm ls --all --json. This command never installs or modifies dependencies.
@@ -8,6 +8,7 @@ Findings, including informational and unfixed records, remain in the report.
 import argparse
 import json
 import re
+import shutil
 import sys
 import tomllib
 from datetime import UTC, datetime
@@ -32,7 +33,7 @@ def locked_packages(root):
     locks = (
         ("Cargo.lock", "crates.io"),
         ("r/src/rust/Cargo.lock", "crates.io"),
-        ("scripts/query-integration/check.py.lock", "PyPI"),
+        ("uv.lock", "PyPI"),
     )
     for relative, ecosystem in locks:
         with (root / relative).open("rb") as source:
@@ -158,15 +159,75 @@ def summary(report):
     return "\n".join(lines) + "\n"
 
 
+def python_packages(root):
+    return {
+        (p["name"].lower().replace("_", "-"), p["version"])
+        for p in locked_packages(root)
+        if p["ecosystem"] == "PyPI"
+    }
+
+
+def export_inventory(root, output):
+    output.mkdir(parents=True, exist_ok=True)
+    # Scanner input only: preserve every locked platform/group branch, never install it.
+    (output / "requirements.txt").write_text(
+        "".join(
+            f"{name}=={version}\n" for name, version in sorted(python_packages(root))
+        )
+    )
+    for label, relative in (
+        ("rust", "Cargo.lock"),
+        ("r_rust", "r/src/rust/Cargo.lock"),
+    ):
+        directory = output / label
+        directory.mkdir(exist_ok=True)
+        shutil.copyfile(root / relative, directory / "Cargo.lock")
+
+
+def verify_inventory(root, path):
+    report = json.loads(path.read_text())
+    reported = {
+        (p["Name"].lower().replace("_", "-"), p["Version"])
+        for result in report.get("Results", [])
+        if result.get("Type") == "pip"
+        for p in result.get("Packages", [])
+    }
+    packages = python_packages(root)
+    missing = packages - reported
+    if missing:
+        raise ValueError(f"Python scanner coverage missing: {sorted(missing)}")
+    print(
+        f"PASS vulnerability inventory covers all {len(packages)} Python lock records"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
     )
-    parser.add_argument("--npm-tree", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--summary", type=Path)
+    commands = parser.add_subparsers(dest="command", required=True)
+    export = commands.add_parser(
+        "export", help="export all locked versions for scanning"
+    )
+    export.add_argument("--output", type=Path, required=True)
+    verify = commands.add_parser(
+        "verify", help="verify the scanner covered the Python lock"
+    )
+    verify.add_argument("report", type=Path)
+    scan = commands.add_parser(
+        "scan", help="query every advisory severity, including informational"
+    )
+    scan.add_argument("--npm-tree", type=Path)
+    scan.add_argument("--output", type=Path, required=True)
+    scan.add_argument("--summary", type=Path)
     args = parser.parse_args()
+    if args.command == "export":
+        export_inventory(args.root, args.output)
+        return
+    if args.command == "verify":
+        verify_inventory(args.root, args.report)
+        return
     packages = locked_packages(args.root)
     report = {
         "checked_at_utc": datetime.now(UTC).isoformat(),

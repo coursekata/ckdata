@@ -16,7 +16,7 @@ dependencies are outside this Cargo inventory.
 License, copyright, AUTHORS and NOTICE files are reproduced below. Source-file
 copyright/license preambles are also preserved. Identical texts share a SHA-256
 reference. Upstream snapshots supply files omitted from published crate archives.
-Refresh or verify with: python3 scripts/check-licenses.py [--write]
+Refresh or verify with: python3 scripts/check_licenses.py [--write]
 
 Cargo.lock SHA-256: d600f3544adee147bbcfd22daa3319a67c26fdc759f4a7a37542a47aadaf2182
 Registry packages: 317

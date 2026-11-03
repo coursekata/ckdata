@@ -1,4 +1,4 @@
-name: verify-release
+name: verify_release
 
 # Installs a release the way a researcher would, on a machine with no Rust, once R-universe has
 # built it, and runs the package's tests against it. R-universe builds outside this repository's

@@ -71,8 +71,16 @@ repos:
 
       - id: license-notices
         name: locked Cargo license notices
-        entry: python3 scripts/check-licenses.py
+        entry: uv run --locked python -m scripts.check_licenses
         language: system
-        files: (^|/)(Cargo\.(toml|lock)|LICENSE)$|^scripts/(check-licenses\.py|licenses/)|^(python/|r/inst/)(THIRD_PARTY_NOTICES\.txt|RUST_RUNTIME_NOTICES\.html)$
+        files: (^|/)(Cargo\.(toml|lock)|LICENSE)$|^scripts/(check_licenses\.py|licenses/)|^(python/|r/inst/)(THIRD_PARTY_NOTICES\.txt|RUST_RUNTIME_NOTICES\.html)$
         pass_filenames: false
+        stages: [pre-push]
+
+      - id: pytest
+        name: Python tests
+        entry: uv run --locked --group bindings --all-packages pytest tests python/tests
+        language: system
+        pass_filenames: false
+        always_run: true
         stages: [pre-push]

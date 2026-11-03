@@ -6,10 +6,11 @@ import os
 import shutil
 import subprocess
 import tarfile
-import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(args, cwd, env):
@@ -247,15 +248,24 @@ source("tools/msrv.R")"""
     run(["Rscript", "-e", expression], package, os.environ.copy())
 
 
-with tempfile.TemporaryDirectory(prefix="ckdata-cache-check-") as directory:
-    for persistent in (False, True):
-        base = Path(directory) / ("persistent" if persistent else "default")
-        check(base, persistent)
-    check(Path(directory) / "debug", persistent=True, debug=True)
-    check_failure_cleanup(Path(directory) / "failure")
-    check_vendor_archive(Path(directory) / "vendor-archive")
-    check_windows(Path(directory) / "windows")
-    check_windows_path_separator(Path(directory) / "windows-path")
-print(
-    "R Cargo cache: spaced paths, cold/warm builds, profiles, source invalidation, cleanup and Windows PATH passed"
+@pytest.mark.parametrize(
+    "persistent,debug", [(False, False), (True, False), (True, True)]
 )
+def test_build_profiles_and_cache_ownership(tmp_path, persistent, debug):
+    check(tmp_path, persistent, debug)
+
+
+def test_failure_cleanup(tmp_path):
+    check_failure_cleanup(tmp_path)
+
+
+def test_vendor_archive_ownership(tmp_path):
+    check_vendor_archive(tmp_path)
+
+
+def test_windows_make_recipe(tmp_path):
+    check_windows(tmp_path)
+
+
+def test_windows_path_separator(tmp_path):
+    check_windows_path_separator(tmp_path)

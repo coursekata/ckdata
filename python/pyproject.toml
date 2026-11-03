@@ -22,6 +22,4 @@ Issues = "https://github.com/coursekata/ckdata/issues"
 [tool.maturin]
 # The crate is ckdata-py, since the core holds the name ckdata; Python imports ckdata.
 module-name = "ckdata"
-
-[dependency-groups]
-test = ["pytest", "polars", "pyarrow", "pandas", "duckdb"]
+locked = true

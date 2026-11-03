@@ -1,5 +1,5 @@
 # Action SHAs only; Renovate tracks supported registries. Manual CRAN and
-# upstream-constrained reviews are recorded in dependency-policy.md.
+# upstream-constrained reviews are recorded in dependency_policy.md.
 version: 2
 updates:
   - package-ecosystem: github-actions
