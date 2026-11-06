@@ -14,12 +14,17 @@ lake_state$tables <- tibble::tibble(path = character(), table = character(), col
 #' rebuild it from a fresh `lake_tbl()` before collecting results.
 #' @param table A table name.
 #' @param schema Database name; defaults to [ckdata_schema()].
+#' @param freshness Optional [collect_saved()] policy for queries derived from
+#'   this table. Overrides connection and application defaults without changing
+#'   other tables. Conflicting policies in a join require a collection override.
 #' @return A lazy dbplyr table using the managed session connection.
 #' @export
-lake_tbl <- function(table, schema = ckdata_schema()) {
+lake_tbl <- function(table, schema = ckdata_schema(), freshness = NULL) {
+  check_freshness(freshness)
   table <- single_string(table, "table")
   schema <- single_string(schema, "schema")
   tbl <- dplyr::tbl(lake_con(), DBI::Id(schema = schema, table = table))
+  tbl$lazy_query$ckdata_freshness <- if (!rlang::is_null(freshness)) list(freshness)
   class(tbl) <- c("tbl_ckdata_lake", class(tbl))
   register_lake_table(tbl)
   tbl

@@ -63,6 +63,7 @@ ckdata()
   profile = NULL,
   region = NULL,
   role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE),
+  freshness = NULL,
   ...
 )
 
@@ -164,6 +165,9 @@ ckdata()
 \item{profile, region}{Optional explicit AWS profile and region.}
 
 \item{role_arn}{Optional role to assume once; defaults to \code{CK_DATALAKE_ROLE_ARN}.}
+
+\item{freshness}{Optional default policy for \code{\link[=collect_saved]{collect_saved()}} on this
+connection. NULL inherits application defaults at collection time.}
 
 \item{...}{Additional arguments; unsupported arguments raise an error.}
 

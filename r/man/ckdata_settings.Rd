@@ -25,4 +25,11 @@ Managed helpers do not silently open another role session.
 For compatibility, managed helpers also accept \code{CK_DATALAKE_INTERNAL_PROFILE}
 and \code{CK_DATALAKE_REGION}. Explicit DBI connections use the standard AWS
 chain unless their corresponding arguments are supplied.
+
+Saved-result freshness can be set through \code{CKDATA_FRESHNESS_AT=07:00} and
+\code{CKDATA_FRESHNESS_TZ=America/Los_Angeles}, or option \code{ckdata.freshness}.
+Explicit \code{freshness} arguments to \code{\link[=collect_saved]{collect_saved()}}, \code{\link[=lake_tbl]{lake_tbl()}} and
+\code{DBI::dbConnect(ckdata(), ...)} override those defaults, in that order.
+See \code{\link[=daily_at]{daily_at()}} for schedules and completed-build revision checks. Normal
+\code{\link[dplyr:collect]{dplyr::collect()}} is unaffected by saved-result configuration.
 }

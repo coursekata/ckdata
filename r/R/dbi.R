@@ -52,15 +52,18 @@ single_string <- function(x, name, call = rlang::caller_env()) {
 #' @param schema Default database, or [ckdata_schema()].
 #' @param profile,region Optional explicit AWS profile and region.
 #' @param role_arn Optional role to assume once; defaults to `CK_DATALAKE_ROLE_ARN`.
+#' @param freshness Optional default policy for [collect_saved()] on this
+#'   connection. NULL inherits application defaults at collection time.
 #' @param ... Additional arguments; unsupported arguments raise an error.
 #' @export
 methods::setMethod("dbConnect", "CkDriver", function(
   drv,
   workgroup = getOption("ckdata.workgroup", Sys.getenv("CK_DATALAKE_WORKGROUP")),
   schema = ckdata_schema(), profile = NULL, region = NULL,
-  role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE), ...
+  role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE), freshness = NULL, ...
 ) {
   rlang::check_dots_empty()
+  check_freshness(freshness)
   workgroup <- single_string(workgroup, "workgroup")
   schema <- single_string(schema, "schema")
   purrr::iwalk(list(profile = profile, region = region, role_arn = role_arn), function(value, name) {
@@ -68,7 +71,7 @@ methods::setMethod("dbConnect", "CkDriver", function(
   })
   state <- rlang::new_environment(list(
     handle = native_wait(native_connect(workgroup, schema, profile, region, role_arn)),
-    open = TRUE, results = rlang::new_environment(), next_result = 0L
+    open = TRUE, results = rlang::new_environment(), next_result = 0L, freshness = freshness
   ))
   methods::new("CkConnection", state = state)
 })

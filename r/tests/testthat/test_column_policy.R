@@ -112,4 +112,7 @@ test_that("managed native tables apply policy once and do not change explicit ta
   expect_match(tail(fixture$calls$queries, 1), 'SELECT "id"', fixed = TRUE)
   expect_no_warning(dplyr::collect(direct))
   expect_match(tail(fixture$calls$queries, 1), "SELECT *", fixed = TRUE)
+  collapsed <- dplyr::collapse(managed)
+  expect_warning(dplyr::collect(collapsed), class = "ckdata_flagged_columns")
+  expect_match(tail(fixture$calls$queries, 1), 'SELECT "id"', fixed = TRUE)
 })

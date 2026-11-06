@@ -34,8 +34,8 @@ query <- lake_tbl("my_table") |>
 
 show_query(query)              # Inspect SQL without executing it
 collect(query)                 # Retrieve a tibble
-collect_cached(query)          # Explicit local Parquet cache
-collect_cached(query, refresh = TRUE)
+collect_saved(query, freshness = daily_at("07:00", tz = "America/Los_Angeles"))
+collect_saved(query, snapshot = "baseline", dir = "snapshots")
 
 lake_query("SELECT 1 AS example")
 lake_query("SELECT 1 AS example", as = "arrow")
@@ -47,7 +47,9 @@ For an explicit connection, use `DBI::dbConnect(ckdata::ckdata(), workgroup = ".
 
 For parallel work, use fresh R sessions or PSOCK workers and create connections in each worker. Forking after ckdata's native runtime starts cannot safely inherit its worker and is rejected.
 
-The managed helpers retain the existing column-policy heuristics. They do not establish arbitrary SQL provenance or replace access controls. Cache entries are local data files, remain until removed by their owner, and do not detect source-data changes; use `refresh = TRUE` to update them.
+The managed helpers retain the existing column-policy heuristics. They do not establish arbitrary SQL provenance or replace access controls. `collect_saved()` keeps Parquet results in R's temporary directory by default. Set `options(ckdata.freshness = daily_at("07:00", "America/Los_Angeles"))`, or `CKDATA_FRESHNESS_AT=07:00` together with `CKDATA_FRESHNESS_TZ=America/Los_Angeles`, to reuse results until the next daily refresh. Explicit collection, table and connection policies take precedence, in that order. Without a policy, each call fetches anew. A source-specific `freshness_check(function(con) ...)` can report completed-build revisions instead; probe results are reused for a configurable interval. `refresh = TRUE` forces a normal result to refresh.
+
+Use `snapshot = TRUE` for an automatically named indefinite snapshot, or a label such as `snapshot = "baseline"`. Snapshots default to the current directory; set `ckdata.snapshot_dir` or pass `dir` to choose another directory. Normal results use `ckdata.saved_dir` when set. Explicit persistent directories and snapshots are not automatically deleted. Saved files can be read offline. Save failures warn and return fresh data; refresh failures warn and return available stale data. See `?collect_saved` for source/access identity when using another DBI driver.
 
 Small local lookup frames can be joined with `left_join(..., copy = "inline")` or `dbplyr::copy_inline(con, lookup)`. dbplyr embeds the values into the SELECT query without creating a remote table. Inline double columns preserve signed infinity; NaN becomes SQL NULL, as in dbplyr projections. Keep inline inputs small.
 

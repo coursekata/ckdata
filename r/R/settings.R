@@ -20,5 +20,12 @@
 #' For compatibility, managed helpers also accept `CK_DATALAKE_INTERNAL_PROFILE`
 #' and `CK_DATALAKE_REGION`. Explicit DBI connections use the standard AWS
 #' chain unless their corresponding arguments are supplied.
+#'
+#' Saved-result freshness can be set through `CKDATA_FRESHNESS_AT=07:00` and
+#' `CKDATA_FRESHNESS_TZ=America/Los_Angeles`, or option `ckdata.freshness`.
+#' Explicit `freshness` arguments to [collect_saved()], [lake_tbl()] and
+#' `DBI::dbConnect(ckdata(), ...)` override those defaults, in that order.
+#' See [daily_at()] for schedules and completed-build revision checks. Normal
+#' [dplyr::collect()] is unaffected by saved-result configuration.
 #' @name ckdata_settings
 NULL

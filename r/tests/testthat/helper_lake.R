@@ -32,7 +32,7 @@ local_classes_lake_tbl <- function(env = rlang::caller_env()) {
 }
 
 # A ckdata query with real SQLite execution for cache and column-policy tests.
-local_cached_tbl <- function(df, name = "t", env = rlang::caller_env()) {
+local_saved_tbl <- function(df, name = "t", env = rlang::caller_env()) {
   fixture <- local_native_connection(env)
   source <- local_memory_con(df, name, env)
   local_lake_session(fixture$con, env)
@@ -47,6 +47,10 @@ local_cached_tbl <- function(df, name = "t", env = rlang::caller_env()) {
   query <- dplyr::tbl(fixture$con, DBI::Id(schema = "main", table = name), vars = names(df))
   register_lake_table(query)
   list(query = query, source = source, calls = fixture$calls)
+}
+
+local_saved_policy <- function(env = rlang::caller_env()) {
+  withr::local_options(list(ckdata.freshness = daily_at("00:00", "UTC")), .local_envir = env)
 }
 
 # A plain dbplyr table over dbplyr's simulated connection: it renders SQL but never runs it, so the

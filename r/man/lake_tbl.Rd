@@ -4,12 +4,16 @@
 \alias{lake_tbl}
 \title{A lazy table in the CourseKata data lake}
 \usage{
-lake_tbl(table, schema = ckdata_schema())
+lake_tbl(table, schema = ckdata_schema(), freshness = NULL)
 }
 \arguments{
 \item{table}{A table name.}
 
 \item{schema}{Database name; defaults to \code{\link[=ckdata_schema]{ckdata_schema()}}.}
+
+\item{freshness}{Optional \code{\link[=collect_saved]{collect_saved()}} policy for queries derived from
+this table. Overrides connection and application defaults without changing
+other tables. Conflicting policies in a join require a collection override.}
 }
 \value{
 A lazy dbplyr table using the managed session connection.

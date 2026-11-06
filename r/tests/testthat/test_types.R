@@ -25,19 +25,20 @@ test_that("Arrow conversion retains nested int64 and stable empty column types",
   expect_identical(frame$text, c("", NA_character_))
 })
 
-test_that("cache refresh and context isolation use the actual DBI path", {
+test_that("saved result refresh and context isolation use the actual DBI path", {
+  local_saved_policy()
   fixture <- local_native_connection()
   tbl <- dplyr::tbl(fixture$con, "types")
   dir <- withr::local_tempdir()
-  first <- collect_cached(tbl, dir = dir)
-  cached <- collect_cached(tbl, dir = dir)
+  first <- collect_saved(tbl, dir = dir)
+  cached <- collect_saved(tbl, dir = dir)
   expect_identical(cached, first)
   expect_length(fixture$calls$queries, 1L)
-  refreshed <- collect_cached(tbl, dir = dir, refresh = TRUE)
+  refreshed <- collect_saved(tbl, dir = dir, refresh = TRUE)
   expect_identical(refreshed, first)
   expect_length(fixture$calls$queries, 2L)
   fixture$calls$account <- "111111111111"
-  expect_identical(collect_cached(tbl, dir = dir), first)
+  expect_identical(collect_saved(tbl, dir = dir), first)
   expect_length(fixture$calls$queries, 3L)
   expect_length(list.files(dir, pattern = "[.]parquet$"), 2L)
 })

@@ -7,14 +7,24 @@
 #' - `ckdata.allow`: flagged columns to accept anyway, as a named list of `table = column names`,
 #'   for example `list(mart_responses = c("lrn_type", "item_id"))`. An allowed column is never
 #'   reported or removed, in any mode.
-#' - `ckdata.verbose`: `TRUE` reports when [collect_cached()] serves a cached
+#' - `ckdata.verbose`: `TRUE` reports when [collect_saved()] reuses a saved
 #'   result. Defaults to `FALSE`. Core failure and role-expiry warnings remain
 #'   visible in either setting.
 #' - `ckdata.timeout`: query timeout in seconds, including result download and
 #'   empty-schema recovery. Defaults to 1800; a cancellation stop request can
 #'   require additional time as documented by the shared core.
-#' - `ckdata.cache_dir`: where [collect_cached()] keeps its parquet files. Defaults to
-#'   `".ckdata-cache"`.
+#' - `ckdata.freshness`: default [collect_saved()] policy; see [daily_at()].
+#'   Explicit collection, table and connection policies take precedence, in
+#'   that order. The option overrides `CKDATA_FRESHNESS_AT` and
+#'   `CKDATA_FRESHNESS_TZ`, which together specify a daily schedule. Without a
+#'   policy, collection fetches anew. Application defaults are read at collection
+#'   time. A schedule assumes the source has refreshed by that time.
+#' - `ckdata.saved_dir`: normal saved-result directory. Defaults to a ckdata
+#'   subdirectory of R's session temporary directory, normally removed at exit.
+#'   An explicit persistent directory keeps files across sessions; freshness
+#'   still applies, and ckdata does not automatically delete those files.
+#' - `ckdata.snapshot_dir`: indefinite snapshot directory. Defaults to the
+#'   current directory. Snapshots never automatically refresh or expire.
 #' - `ckdata.schema`: the database [lake_tbl()] opens a table from when the call names none; see
 #'   [ckdata_schema()].
 #'
@@ -26,7 +36,7 @@
 #' - Every column of a **staging** (`stg_`) or **intermediate** (`int_`) table, which can change
 #'   without notice, unless a published table in the same query has it too, as a join key does.
 #'
-#' ckdata checks a query when [dplyr::collect()] or [collect_cached()] runs it. The check reads only
+#' ckdata checks a query when [dplyr::collect()] or [collect_saved()] runs it. The check reads only
 #' the query's SQL and columns, never the data.
 #'
 #' - `"explore"`: nothing is checked. Use it while you work things out.
@@ -39,7 +49,8 @@
 #' The modes are a helper for the common cases, not a guarantee. Because the check reads only the
 #' SQL, a flagged column that is renamed, or that a join returns as `.x` or `.y`, is reported but
 #' not removed; a query whose first table did not come from [lake_tbl()] is checked only by
-#' [collect_cached()]; and now and then a warning names a column the query did not need.
+#' [collect_saved()] on a ckdata connection; and now and then a warning names a
+#' column the query did not need. Other DBI drivers do not use lake column rules.
 #' @seealso [ckdata_settings]
 #' @name ckdata_options
 NULL
