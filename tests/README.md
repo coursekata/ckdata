@@ -27,6 +27,7 @@ uv run --locked pytest tests/unit              # fast tests
 uv run --locked pytest tests/integration       # R build integration tests
 uv run --locked --group bindings --all-packages pytest python/tests
 cargo test --workspace --all-targets --locked --exclude ckdata-py
+Rscript -e 'Sys.setenv(R_INCLUDE_DIR = R.home("include")); quit(status = system2("cargo", c("test", "--manifest-path", "r/src/rust/Cargo.toml", "--all-targets", "--locked")))'
 Rscript -e 'devtools::test("r")'
 ```
 
@@ -37,8 +38,56 @@ compiled before testing. Cargo still reuses unchanged dependencies. The two Carg
 separate because the R source package carries an independently buildable crate.
 
 CI runs the fast tests before expensive native package checks and runs the R
-build tests in the job that installs R. No test runs on import. All live AWS
-access is confined to the explicit command below.
+build tests in the job that installs R. No test runs on import. Live AWS tests
+require the explicit acceptance commands below.
+
+The R crate has its own workspace, so the root Cargo command does not run its
+native bridge tests. The Rscript command supplies R's header location and runs
+those tests directly. CI runs them at the declared minimum Rust version, and
+the pre-push hooks run them with the selected local toolchain.
+
+## R interface tests
+
+`r/tests/testthat/` covers DBI cursor lifecycle and paging, quoting, dbplyr SQL,
+column policy, cache isolation, Arrow/R types, interrupts and fixed-role expiry.
+It uses invented native Arrow fixtures and SQLite tables. Selected DBItest
+conformance cases exercise the supported read-side interface; write/transaction
+cases are outside this backend's scope. No ordinary R test contacts AWS.
+
+The synthetic acceptance runner exercises the actual R-to-Rust query path:
+
+```sh
+Rscript --vanilla r/tests/acceptance/query_acceptance.R \
+  --run-live /absolute/path/to/ckdata-test-deployment.json internal
+Rscript --vanilla r/tests/acceptance/query_acceptance.R \
+  --run-live /absolute/path/to/ckdata-test-deployment.json research
+```
+
+Install the local R package and its suggested test dependencies first. Credentials
+use the standard AWS SDK configuration. The internal seat needs a source identity
+allowed to assume its synthetic reader; the research seat needs the synthetic
+source role as its source identity. The runner always assumes the contract's
+restricted reader role and checks the resulting account, role, workgroup and
+schema before querying. It accepts only the fixed synthetic namespace and invented
+`types` table. It prints assertions without rows and never deletes AWS outputs.
+
+The checks compare populated and empty scalar/nested Arrow schemas, R conversion
+types, DBI paging and literal round trips, metadata, dbplyr queries and explicit
+cache refresh. Inline lookup checks cover scalar types, quotes, NULL/empty values,
+exact int64, dates/timestamps, and joins with populated or empty local frames,
+without creating remote tables. Literal round trips use named, typed output: the unmodified DBItest
+templates include unnamed expressions and untyped NULL columns, which UNLOAD
+rejects. Acceptance checks those rejections explicitly; full DBI conformance is
+not claimed. Running without the exact live flag and contract exits before any
+AWS client is created. Real-role and actual one-hour expiry checks remain final
+parent-ticket acceptance.
+
+Value assertions include precision-38 decimals in Arrow, populated nested members,
+nullable narrow scalars, historical/future timestamps and nested timestamps,
+binary NULL/empty/all-byte values, and Unicode/escaping. Metadata tests retain
+partition keys and complete column types across partial/exhausted fetches. Offline
+reader/cursor fixtures interleave empty files/batches with populated row groups
+and introduce NULLs only in later files.
 
 ## Rust acceptance
 
@@ -87,7 +136,7 @@ uv run --locked pytest tests/unit/test_query_probe.py
 ```
 
 Real internal/enclave-role checks and actual one-hour expiry remain final
-BB-6315 acceptance. The Python probe cannot run against those production roles.
+BB-6313 acceptance. The Python probe cannot run against those production roles.
 
 The synthetic deployment contract is fixed to `us-west-2`, the generated fixture
 namespace, and both seat identities. Before submitting a query, each harness checks
@@ -108,7 +157,10 @@ used as an installation requirements file.
 
 Both harnesses accept millisecond, microsecond and nanosecond Arrow storage for
 naive timestamps and require the exact expected instant. Athena INT96 output can
-use a different storage unit from the fixture input. Width, decimal precision
+use a different storage unit from the fixture input. The reader supplies an
+upstream microsecond type hint for INT96 before decoding, avoiding nanosecond
+overflow for historical/future dates; native nanosecond columns remain unchanged.
+Width, decimal precision
 and scale, array element type, NULLs and timezone changes remain checked.
 
 Successful core queries include `SessionExpiring` in their warnings during the

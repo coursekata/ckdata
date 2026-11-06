@@ -126,7 +126,7 @@ jobs:
           python3 scripts/check_licenses.py
 
   rust-minimum:
-    timeout-minutes: 15
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
@@ -155,12 +155,20 @@ jobs:
             ~/.cargo/git
             target
           key: cargo-msrv-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.minimum.outputs.key }}-${{ hashFiles('Cargo.lock', 'r/src/rust/Cargo.lock', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.toml') }}
-      - name: Check both workspaces at the declared minimum
+      - name: Check the root workspace at the declared minimum
+        env:
+          MINIMUM_RUST: ${{ steps.minimum.outputs.version }}
+        run: cargo +"$MINIMUM_RUST" check --workspace --all-targets --locked
+
+      - name: Test the R native bridge at the declared minimum
+        shell: Rscript {0}
         env:
           MINIMUM_RUST: ${{ steps.minimum.outputs.version }}
         run: |
-          cargo +"$MINIMUM_RUST" check --workspace --all-targets --locked
-          cargo +"$MINIMUM_RUST" check --manifest-path r/src/rust/Cargo.toml --locked
+          Sys.setenv(R_INCLUDE_DIR = R.home("include"))
+          status <- system2("cargo", c(paste0("+", Sys.getenv("MINIMUM_RUST")),
+            "test", "--manifest-path", "r/src/rust/Cargo.toml", "--all-targets", "--locked"))
+          quit(status = status)
 
   dependency-inventory:
     timeout-minutes: 15

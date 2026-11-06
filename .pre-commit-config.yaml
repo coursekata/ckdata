@@ -77,6 +77,15 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: cargo-test-r
+        name: cargo test (R native bridge)
+        entry: Rscript -e 'Sys.setenv(R_INCLUDE_DIR = R.home("include")); quit(status = system2("cargo", c("test", "--manifest-path", "r/src/rust/Cargo.toml", "--all-targets", "--locked")))'
+        language: system
+        files: (^|/)(Cargo\.(toml|lock)|[^/]+\.rs)$
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       - id: pytest
         name: Python tests
         entry: uv run --locked --group bindings --all-packages pytest tests python/tests

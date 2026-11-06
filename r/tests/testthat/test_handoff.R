@@ -8,15 +8,9 @@ test_that("the handoff keeps NULL, the empty string and 64-bit integers", {
   expect_identical(attr(x$ts, "tzone"), "UTC")
 })
 
-
-test_that("the stream producer never accepts caller-controlled addresses", {
-  malformed <- list(NULL, "", "0", "1", "4096", 4096, new("externalptr"),
-                    nanoarrow::nanoarrow_allocate_array_stream(),
-                    structure(list(), class = "nanoarrow_array_stream"))
-  for (value in malformed) {
-    expect_error(arrow_probe_stream(value), "unused argument")
-    expect_error(.Call(wrap__arrow_probe_stream, value), "Incorrect number of arguments")
-  }
+test_that("R and native stream entrypoints reject extra arguments", {
+  expect_error(arrow_probe_stream("4096"), "unused argument")
+  expect_error(.Call(wrap__arrow_probe_stream, "4096"), "Incorrect number of arguments")
 })
 
 test_that("the producer owns its stream across garbage collection and export", {

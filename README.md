@@ -1,16 +1,61 @@
 # ckdata
 
-ckdata is being rebuilt around a Rust core shared by its R and Python packages. The core connects to Athena and reads Parquet results into Arrow. The R and Python query bindings are still in development.
+ckdata provides a read-only R DBI/dbplyr interface to the CourseKata data lake. A Rust core executes Athena queries and reads Parquet results into Arrow. The Python query interface is still in development.
 
 ## Status
 
-This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
+This is an unpublished development build. The R package supports lazy queries, SQL, typed empty results and explicit local caching. Use [ckdata-r](https://github.com/coursekata/ckdata-r) for the published package until this replacement completes acceptance and its first binary release. Python wheels and PyPI publication follow full Python package testing.
 
 The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Queries use UNLOAD with a fresh workgroup output prefix and support cancellation. The core retrieves file paths through Athena's paginated manifest API and reads the files with the upstream Parquet reader. Athena writes UNLOAD files in parallel, so combined row order is not guaranteed, even with `ORDER BY`. Tests use invented configuration and mocked HTTP services.
 
 ## Install
 
-For the working R package, follow the installation instructions in [ckdata-r](https://github.com/coursekata/ckdata-r). This rewrite is not available from CourseKata's R-universe. Its binary-install instructions will be added with the first usable R release.
+This replacement is not yet available from CourseKata's R-universe. To try the local source package, install R 4.2 or later and [Rust through rustup](https://rustup.rs), then run from the repository root:
+
+```sh
+Rscript -e 'install.packages("pak"); pak::local_install("r")'
+```
+
+Source installation requires Rust 1.94.1 or later, a C compiler, make and xz. The planned binary checks cover the current R release on Ubuntu 26.04 x86_64, macOS arm64 and Windows x86_64; other systems and R versions require source installation. Binary installation commands will be added after those checks pass against the first release.
+
+On Windows, install the [Rtools version matching your R installation](https://cran.r-project.org/bin/windows/Rtools/) and add Rust's GNU target with `rustup target add x86_64-pc-windows-gnu`. Clone with symlinks enabled as described under [Developing](#developing).
+
+## R usage
+
+Sign in using your organization's AWS process, then select a standard AWS profile and region. Set `CK_DATALAKE_WORKGROUP` and `CK_DATALAKE_SCHEMA` for the intended environment; the workgroup supplies the result location and encryption. See `?ckdata::ckdata_settings` for connection options.
+
+```r
+library(ckdata)
+library(dplyr)
+
+query <- lake_tbl("my_table") |>
+  filter(category == "example") |>
+  summarise(n = n())
+
+show_query(query)              # Inspect SQL without executing it
+collect(query)                 # Retrieve a tibble
+collect_cached(query)          # Explicit local Parquet cache
+collect_cached(query, refresh = TRUE)
+
+lake_query("SELECT 1 AS example")
+lake_query("SELECT 1 AS example", as = "arrow")
+```
+
+Printing a lazy table previews rows and executes a query. Empty results retain their schema. R output uses Arrow's conversions and consistently represents BIGINT as `bit64::integer64`; Arrow output preserves full precision and nested types. See `?ckdata::ckdata_types`. UNLOAD does not guarantee global row order: use `collect() |> arrange(...)` when local order matters.
+
+For an explicit connection, use `DBI::dbConnect(ckdata::ckdata(), workgroup = "...", schema = "...", profile = "...")`, ordinary read-side DBI methods, and `DBI::dbDisconnect()`. Writes, transactions and remote materialization are unsupported. `median()` and `quantile()` require an explicit choice of `approx_median()` or `approx_quantile()` remotely. Additional assumed-role sessions expire without renewal. Call `lake_disconnect()`, then rebuild saved lazy queries from a fresh `lake_tbl()` to open a new managed session. Saved queries keep their old connection. For an explicit DBI connection, close and recreate it and rebuild its lazy queries.
+
+For parallel work, use fresh R sessions or PSOCK workers and create connections in each worker. Forking after ckdata's native runtime starts cannot safely inherit its worker and is rejected.
+
+The managed helpers retain the existing column-policy heuristics. They do not establish arbitrary SQL provenance or replace access controls. Cache entries are local data files, remain until removed by their owner, and do not detect source-data changes; use `refresh = TRUE` to update them.
+
+Small local lookup frames can be joined with `left_join(..., copy = "inline")` or `dbplyr::copy_inline(con, lookup)`. dbplyr embeds the values into the SELECT query without creating a remote table. Inline double columns preserve signed infinity; NaN becomes SQL NULL, as in dbplyr projections. Keep inline inputs small.
+
+Use positional `?` placeholders with `DBI::dbGetQuery(con, "SELECT ? AS value", params = list("O'Brien"))`, or prepare with `dbSendQuery()` and call `dbBind()` before fetching. Parameters use Athena's native execution API. An unnamed list binds by position; data frame columns also bind by position. Equal-length vectors execute one query per row and concatenate the results. Rebinding replaces the previous result. Zero-length vectors return a typed empty result using schema recovery. Bindings support logical, integer, double, character, factor, exact `integer64`, Date, POSIXt, difftime, and lists of raw vectors/NULL for binary values. Factor parameters are converted to character with a warning. Temporal predicates can bind difftime values as TIME; Athena UNLOAD cannot return TIME columns. Query timeouts apply to each execution.
+
+Typed missing R literals in dbplyr projections retain their column types, including when the query has no rows. SQL still determines types in expressions such as `id + NA`. Raw SQL NULLs need an explicit cast when Athena cannot infer a type.
+
+Raw SQL follows Parquet UNLOAD's output rules: give expressions column aliases (`SELECT 1 AS example`) and cast standalone NULL outputs (`SELECT CAST(NULL AS VARCHAR) AS example`). Athena also rejects duplicate output names and types unsupported by UNLOAD. ckdata does not rewrite SQL to change those outputs; its DBI support is a read-side subset rather than full conformance.
 
 ## Layout
 
@@ -39,7 +84,9 @@ cargo test --workspace --all-targets --locked --exclude ckdata-py
 Rscript -e 'devtools::test("r")'
 ```
 
-`Rscript -e 'devtools::document("r")'` regenerates R documentation and wrappers after an exported function changes.
+Install development dependencies first with `Rscript -e 'pak::local_install_dev_deps("r")'`.
+
+`Rscript -e 'devtools::document("r")'` regenerates R documentation. After changing an extendr export, run `cargo run --manifest-path rust/Cargo.toml --bin document` from `r/src`, then regenerate the R documentation.
 
 The [query integration harness](tests/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. The Rust acceptance example runs the implemented reader through both test roles. Its help and ordinary Rust tests are offline; live checks require an explicit flag and the deployment contract from ck-datalake's `environments/ckdata-test` root.
 
@@ -76,7 +123,7 @@ To build the Python binding and run its handoff tests in the same environment:
 uv run --locked --group bindings --all-packages pytest python/tests
 ```
 
-On Windows, git checks the core's symlink out as a text file unless symlinks are enabled. Turn on Developer Mode, then clone with `git clone -c core.symlinks=true`.
+On Windows, git checks the core's symlink out as a text file unless symlinks are enabled. Turn on Developer Mode, then clone with `git clone -c core.symlinks=true https://github.com/coursekata/ckdata.git`.
 
 ## Releasing
 

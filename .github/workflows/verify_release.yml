@@ -122,10 +122,10 @@ jobs:
             minor <- sub("\\.[0-9]+$", "", as.character(getRversion()))
             bin <- function(u) sprintf("%s/bin/linux/%s-%s/%s/", u, codename, R.version$arch, minor)
             options(repos = c(universe = bin(universe), cran = bin("https://cran.r-universe.dev")))
-            install.packages(c(package, "testthat"))
+            install.packages(c(package, "testthat", "DBItest", "RSQLite"))
           } else {
             options(repos = c(universe = universe, CRAN = "https://cloud.r-project.org"))
-            install.packages(c(package, "testthat"), type = "binary")
+            install.packages(c(package, "testthat", "DBItest", "RSQLite"), type = "binary")
           }
           stopifnot(identical(as.character(packageVersion(package)), version))
           testthat::test_dir("r/tests/testthat", package = package, load_package = "installed", stop_on_failure = TRUE)
