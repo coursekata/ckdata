@@ -32,7 +32,7 @@ def fixture(base):
         directory.mkdir(parents=True, exist_ok=True)
     for name in ("config.R", "msrv.R"):
         shutil.copyfile(ROOT / "r/tools" / name, package / "tools" / name)
-    for name in ("Makevars.in", "Makevars.win.in"):
+    for name in ("Makevars.in", "Makevars.win.in", "Makevars.common"):
         shutil.copyfile(ROOT / "r/src" / name, source / name)
     (package / "DESCRIPTION").write_text(
         "Package: cacheprobe\nVersion: 0.0.1\nSystemRequirements: Cargo, rustc >= 1.94\n"
@@ -164,6 +164,9 @@ def check_vendor_archive(base):
     for name in ("CARGO_HOME", "CARGO_TARGET_DIR", "DEBUG", "NOT_CRAN"):
         env.pop(name, None)
     (source / "rust/vendor-config.toml").write_text("")
+    (source / "rust/document.rs").write_text(
+        'fn main() { assert_eq!(std::fs::read_to_string("vendor/synthetic").expect("archive sentinel must be extracted"), "synthetic vendored artifact"); println!("vendor-sentinel-observed"); }\n'
+    )
     with tarfile.open(source / "rust/vendor.tar.xz", "w:xz") as archive:
         payload = b"synthetic vendored artifact"
         entry = tarfile.TarInfo("vendor/synthetic")
@@ -181,19 +184,24 @@ def check_vendor_archive(base):
         env,
     )
     run(["Rscript", "tools/config.R"], package, env)
-    run(["make", "-f", "harness.mk", "all"], source, env)
+    output = run(["make", "-f", "harness.mk", "all"], source, env)
+    assert "vendor-sentinel-observed" in output, output
     assert not (source / "vendor").exists()
     assert not (source / ".ckdata-vendor-created").exists()
     assert not list(source.glob(".ckdata-cargo.*"))
 
 
-def check_windows(base):
+def check_windows(base, debug=False):
     package = fixture(base)
     target = base / "cargo target with spaces"
     env = os.environ.copy()
+    for name in ("DEBUG", "NOT_CRAN"):
+        env.pop(name, None)
     env.update(
         CARGO_TARGET_DIR=str(target), CARGO_HOME=str(base / "cargo home with spaces")
     )
+    if debug:
+        env["DEBUG"] = "1"
     # Generate the Windows template on this host; do not execute cross-compiled binaries.
     run(
         ["Rscript", "-e", '.Platform$OS.type <- "windows"; source("tools/config.R")'],
@@ -208,9 +216,8 @@ def check_windows(base):
     assert f'cd "{target}" && pwd -P' in commands, commands
     assert f"{source}/{target}" not in commands, commands
     assert f'--target-dir "{target}"' in commands, commands
-    assert (
-        "cargo run" in commands and "--release" in commands.split("cargo run", 1)[1]
-    ), commands
+    assert "cargo run" in commands, commands
+    assert ("--release" in commands.split("cargo run", 1)[1]) is not debug, commands
     cleanup = run(["make", "-n", "-f", "harness.mk", "clean"], source, env)
     assert str(target) not in cleanup, cleanup
     # Execute the Windows shell recipe with a synthetic Cargo process. This checks
@@ -231,6 +238,7 @@ def check_windows(base):
     assert len(calls) == 2, calls
     for call in calls:
         arguments = call["args"]
+        assert "--locked" in arguments, call
         assert arguments[arguments.index("--target-dir") + 1] == str(target), call
         assert call["library_path"].endswith(f";{target.resolve()}/libgcc_mock"), call
 
@@ -263,8 +271,62 @@ def test_vendor_archive_ownership(tmp_path):
     check_vendor_archive(tmp_path)
 
 
-def test_windows_make_recipe(tmp_path):
-    check_windows(tmp_path)
+@pytest.mark.parametrize("debug", [False, True])
+def test_windows_make_recipe(tmp_path, debug):
+    check_windows(tmp_path, debug)
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+@pytest.mark.parametrize("failure_stage", ["build", "run"])
+def test_windows_failure_cleanup(tmp_path, persistent, failure_stage):
+    package = fixture(tmp_path)
+    source = package / "src"
+    env = os.environ.copy()
+    for name in ("CARGO_HOME", "CARGO_TARGET_DIR", "DEBUG", "NOT_CRAN"):
+        env.pop(name, None)
+    home = tmp_path / "cargo home with spaces"
+    if persistent:
+        home.mkdir()
+        (home / "caller-owned").touch()
+        env["CARGO_HOME"] = str(home)
+    run(
+        ["Rscript", "-e", '.Platform$OS.type <- "windows"; source("tools/config.R")'],
+        package,
+        env,
+    )
+    (source / "harness.mk").write_text(
+        "SHLIB = cacheprobe.dll\nWIN = 64\ninclude Makevars.win\n$(SHLIB):\n\ttouch $@\n"
+    )
+    binaries = tmp_path / "bin with spaces"
+    binaries.mkdir()
+    cargo = binaries / "cargo"
+    cargo.write_text(
+        "#!/usr/bin/env python3\nimport json, os, sys\n"
+        'with open(os.environ["CARGO_PROBE_LOG"], "a") as log:\n'
+        '    log.write(json.dumps({"args": sys.argv[1:], "home": os.environ["CARGO_HOME"]}) + "\\n")\n'
+        'sys.exit(37 if sys.argv[1] == os.environ["CARGO_FAIL_STAGE"] else 0)\n'
+    )
+    cargo.chmod(0o755)
+    log = tmp_path / "cargo-arguments.jsonl"
+    env.update(
+        PATH=f"{binaries}{os.pathsep}{env['PATH']}",
+        CARGO_PROBE_LOG=str(log),
+        CARGO_FAIL_STAGE=failure_stage,
+    )
+    with pytest.raises(RuntimeError):
+        run(["make", "-f", "harness.mk", "all"], source, env)
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [call["args"][0] for call in calls] == (
+        ["build"] if failure_stage == "build" else ["build", "run"]
+    )
+    assert all("--locked" in call["args"] for call in calls)
+    used_home = Path(calls[0]["home"])
+    if persistent:
+        assert used_home == home
+        assert (home / "caller-owned").exists()
+    else:
+        assert not used_home.exists()
+    assert not list(source.glob(".ckdata-cargo.*"))
 
 
 def test_windows_path_separator(tmp_path):

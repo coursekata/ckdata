@@ -49,20 +49,20 @@
     ],
     "revision": "7e163021e59cca4f8e1e35a7c828b5c6b7915953"
   },
-  "pyo3-arrow@0.20.0": {
+  "pyo3-arrow@0.21.0": {
     "files": [
       {
         "file": "upstream/pyo3-arrow-LICENSE_MIT",
         "sha256": "a429abe835dbbe9227152b9af6116337bb2609ed15947e3288221abf939b278e",
-        "url": "https://github.com/kylebarron/arro3/blob/ca284a4c75834ae04d7874ccad699e0fecc3dfbb/LICENSE_MIT"
+        "url": "https://github.com/kylebarron/arro3/blob/3cb8549ccd536bdfae20f1111c9921c0a8789549/LICENSE_MIT"
       },
       {
         "file": "upstream/pyo3-arrow-LICENSE_APACHE",
         "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
-        "url": "https://github.com/kylebarron/arro3/blob/ca284a4c75834ae04d7874ccad699e0fecc3dfbb/LICENSE_APACHE"
+        "url": "https://github.com/kylebarron/arro3/blob/3cb8549ccd536bdfae20f1111c9921c0a8789549/LICENSE_APACHE"
       }
     ],
-    "revision": "ca284a4c75834ae04d7874ccad699e0fecc3dfbb"
+    "revision": "3cb8549ccd536bdfae20f1111c9921c0a8789549"
   },
   "vsimd@0.8.0": {
     "files": [

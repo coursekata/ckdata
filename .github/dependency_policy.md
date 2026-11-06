@@ -70,21 +70,11 @@ Regenerate documentation with roxygen2 8.1.1 when documentation next changes.
 
 ## Upgrades constrained by current parents
 
-The following list covers every newer stable Rust line identified in the 2026-11-02 review after the compatible updates above. These are pending updates, not audit exclusions. Each listed requirement comes from the resolved parent package's published manifest. Recheck it on a parent release, and rerun `cargo metadata --locked --format-version 1` for both workspaces when assessing an upgrade. Multiple major versions already coexist for some packages; updating one does not remove the older required copy.
+The following list covers every newer stable Rust line identified in the 2026-11-04 review after the coordinated Arrow 60.1.0 and pyo3-arrow 0.21.0 upgrade. These are pending updates, not audit exclusions. Each listed requirement comes from the resolved parent package's published manifest. Recheck it on a parent release, and rerun `cargo metadata --locked --format-version 1` for both workspaces when assessing an upgrade. Multiple major versions already coexist for some packages; updating one does not remove the older required copy.
 
 | Package | Locked → newer stable | Blocking parent requirement |
 |---|---|---|
-| `arrow-array` | 59.3.2 → 60.1.0 | `arrow-cast 59.3.2: ^59.3.2`; `arrow-ipc 59.3.2: ^59.3.2`; `arrow-ord 59.3.2: ^59.3.2`; `arrow-select 59.3.2: ^59.3.2`; `ckdata 0.0.1: ^59`; `ckdata-r 0.0.1: ^59`; `parquet 59.3.2: ^59.3.2`; `pyo3-arrow 0.20.0: ^59` |
-| `arrow-buffer` | 59.3.2 → 60.1.0 | `arrow-array 59.3.2: ^59.3.2`; `arrow-cast 59.3.2: ^59.3.2`; `arrow-data 59.3.2: ^59.3.2`; `arrow-ipc 59.3.2: ^59.3.2`; `arrow-ord 59.3.2: ^59.3.2`; `arrow-select 59.3.2: ^59.3.2`; `parquet 59.3.2: ^59.3.2`; `pyo3-arrow 0.20.0: ^59` |
-| `arrow-cast` | 59.3.2 → 60.1.0 | `pyo3-arrow 0.20.0: ^59` |
-| `arrow-data` | 59.3.2 → 60.1.0 | `arrow-array 59.3.2: ^59.3.2`; `arrow-cast 59.3.2: ^59.3.2`; `arrow-ipc 59.3.2: ^59.3.2`; `arrow-ord 59.3.2: ^59.3.2`; `arrow-select 59.3.2: ^59.3.2`; `parquet 59.3.2: ^59.3.2`; `pyo3-arrow 0.20.0: ^59` |
-| `arrow-ipc` | 59.3.2 → 60.1.0 | `parquet 59.3.2: ^59.3.2` |
-| `arrow-ord` | 59.3.2 → 60.1.0 | `arrow-cast 59.3.2: ^59.3.2`; `ckdata 0.0.1: ^59` |
-| `arrow-schema` | 59.3.2 → 60.1.0 | `arrow-array 59.3.2: ^59.3.2`; `arrow-cast 59.3.2: ^59.3.2`; `arrow-data 59.3.2: ^59.3.2`; `arrow-ipc 59.3.2: ^59.3.2`; `arrow-ord 59.3.2: ^59.3.2`; `arrow-select 59.3.2: ^59.3.2`; `ckdata 0.0.1: ^59`; `parquet 59.3.2: ^59.3.2`; `pyo3-arrow 0.20.0: ^59` |
-| `arrow-select` | 59.3.2 → 60.1.0 | `arrow-cast 59.3.2: ^59.3.2`; `arrow-ipc 59.3.2: ^59.3.2`; `arrow-ord 59.3.2: ^59.3.2`; `ckdata 0.0.1: ^59`; `parquet 59.3.2: ^59.3.2`; `pyo3-arrow 0.20.0: ^59` |
-| `atoi` | 2.0.0 → 3.1.1 | `arrow-cast 59.3.2: ^2.0.0` |
 | `block-buffer` | 0.10.4 → 0.12.1 | `digest 0.10.7: ^0.10` |
-| `comfy-table` | 7.2.2 → 8.0.1 | `arrow-cast 59.3.2: ^7` |
 | `cpufeatures` | 0.2.17 → 0.3.1 | `sha1 0.10.7: ^0.2` |
 | `crypto-common` | 0.1.7 → 0.2.2 | `digest 0.10.7: ^0.1.3` |
 | `digest` | 0.10.7 → 0.11.3 | `crc-fast 1.10.0: ^0.10`; `sha1 0.10.7: ^0.10.7` |
@@ -95,8 +85,6 @@ The following list covers every newer stable Rust line identified in the 2026-11
 | `lru` | 0.18.5 → 0.19.0 | `aws-sdk-s3 1.157.0: ^0.18.2` |
 | `nom` | 7.1.3 → 8.0.0 | `cbor-diag 0.1.12: ^7.1.3` |
 | `num-bigint` | 0.4.8 → 0.5.1 | `cbor-diag 0.1.12: ^0.4.3`; `num-rational 0.4.2: ^0.4.0` |
-| `object` | 0.39.1 → 0.40.0 | `ar_archive_writer 0.5.3: ^0.39` |
-| `parquet` | 59.3.2 → 60.1.0 | `ckdata 0.0.1: ^59` |
 | `phf` | 0.12.1 → 0.14.0 | `chrono-tz 0.10.4: ^0.12` |
 | `phf_shared` | 0.12.1 → 0.14.0 | `phf 0.12.1: ^0.12.0` |
 | `r-efi` | 5.3.0 → 7.1.0 | `getrandom 0.3.4: ^5.1` |
@@ -104,7 +92,7 @@ The following list covers every newer stable Rust line identified in the 2026-11
 | `roxmltree` | 0.14.1 → 0.21.2 | `aws-smithy-protocol-test 0.64.0: ^0.14.1` |
 | `sha1` | 0.10.7 → 0.11.0 | `aws-config 1.13.0: ^0.10` |
 | `spin` | 0.10.1 → 0.12.3 | `crc-fast 1.10.0: ^0.10.0` |
-| `syn` | 2.0.119 → 3.0.9 | `aws-smithy-runtime-api-macros 1.2.0: ^2.0.114`; `extendr-macros 0.9.0: ^2.0.109`; `recursive-proc-macro-impl 0.1.1: ^2.0`; `tracing-attributes 0.1.31: ^2.0`; `windows-implement 0.60.2: ^2.0`; `windows-interface 0.59.3: ^2.0`; `zerocopy-derive 0.8.63: ^2.0.46` |
+| `syn` | 2.0.119 → 3.0.9 | `aws-smithy-runtime-api-macros 1.2.0: ^2.0.114`; `extendr-macros 0.9.0: ^2.0.109`; `tracing-attributes 0.1.31: ^2.0`; `windows-implement 0.60.2: ^2.0`; `windows-interface 0.59.3: ^2.0`; `zerocopy-derive 0.8.63: ^2.0.46` |
 | `wasi` | 0.11.1+wasi-snapshot-preview1 → 0.14.7+wasi-0.2.4 | `getrandom 0.2.17: ^0.11`; `mio 1.2.4: ^0.11.0` |
 | `wasip2` | 1.0.4+wasi-0.2.12 → 2.0.1+wasi-0.2.12 | `getrandom 0.3.4: ^1` |
 | `windows-core` | 0.62.2 → 0.100.0 | `iana-time-zone 0.1.65: >=0.56, <=0.62` |
@@ -125,6 +113,6 @@ The following list covers every newer stable Rust line identified in the 2026-11
 | `windows_x86_64_msvc` | 0.52.6 → 0.53.1 | `windows-targets 0.52.6: ^0.52.6` |
 | `wit-bindgen` | 0.57.1 → 0.63.0 | `wasip2 1.0.4+wasi-0.2.12: ^0.57.1` |
 
-Arrow and Parquet move together with pyo3-arrow. The latest `pyo3-arrow 0.20.0` still requires `arrow-* ^59`, so Arrow 60.1.0 requires a compatible binding release or a deliberate binding change. Keep the grouped Renovate update visible until that work is possible.
+Arrow and Parquet move together with pyo3-arrow. `pyo3-arrow 0.21.0`, published on 2026-11-04, supports Arrow 60.1.0 and PyO3 0.30. The earlier Arrow 59 constraint is removed in both workspaces. The grouped Renovate update remains configured for future releases. This release becomes seven days old on 2026-11-11; local compatibility checks do not waive the publication waiting period.
 
 The Windows 0.100.0 family also needs an MSRV decision: `windows-core`, `windows-implement`, `windows-interface`, `windows-result`, and `windows-strings` require Rust 1.95, above the declared 1.94.1 minimum. `windows-link 0.100.0` requires 1.85, but its current parents still request 0.2. A compatible parent release alone does not authorize raising the project minimum. Test the declared minimum and the supported Windows R build before changing it.
