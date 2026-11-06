@@ -184,16 +184,20 @@ def test_manifest_rejects_other_prefixes(path):
         probe.manifest_files((path + "\n").encode(), "s3://synthetic/results/probe/")
 
 
-def test_kms_object_identity():
-    key = "arn:aws:kms:us-west-2:000000000000:key/synthetic"
-    probe.encryption_matches(
-        {"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": key},
-        {"EncryptionOption": "SSE_KMS", "KmsKey": key},
+def test_kms_object_requires_matching_full_key_arn():
+    key = "arn:aws:kms:us-west-2:000000000000:key/00000000-0000-4000-8000-000000000001"
+    response = {"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": key}
+    expected = {"EncryptionOption": "SSE_KMS", "KmsKey": key}
+    probe.encryption_matches(response, expected)
+    response["SSEKMSKeyId"] = (
+        "arn:aws:kms:us-west-2:000000000000:key/00000000-0000-4000-8000-000000000002"
     )
+    with pytest.raises(RuntimeError, match="different KMS key"):
+        probe.encryption_matches(response, expected)
 
 
 @pytest.mark.parametrize("unit", ["ms", "us", "ns"])
-def test_naive_timestamp_storage_preserves_exact_instant(table, unit):
+def test_naive_timestamp_accepts_supported_storage_units(table, unit):
     probe.check_types(
         table.cast(table.schema.set(5, pa.field("ts", pa.timestamp(unit))))
     )
@@ -218,22 +222,15 @@ def test_schema_drift_is_rejected(table, name, changed_type):
         probe.check_types(changed)
 
 
-def test_parquet_round_trip_retains_types_and_empty_schema(table):
-    buffer = io.BytesIO()
-    pq.write_table(table, buffer)
-    restored = pq.read_table(pa.BufferReader(buffer.getvalue()))
-    probe.check_types(restored)
-    assert restored.slice(0, 0).schema == table.schema
-
-
-def test_unload_values_and_schema_bearing_empty_result(query_probe):
-    probe.check_types(query_probe.unload(probe.PROBE, "offline-literal"))
-    assert (
-        query_probe.unload(
-            probe.PROBE + " WHERE false", "offline-empty", allow_empty=True
-        ).num_rows
-        == 0
+def test_unload_values_and_schema_bearing_empty_result(query_probe, table):
+    populated = query_probe.unload(probe.PROBE, "offline-literal")
+    probe.check_types(populated)
+    assert populated.equals(table)
+    empty = query_probe.unload(
+        probe.PROBE + " WHERE false", "offline-empty", allow_empty=True
     )
+    assert empty.schema == populated.schema
+    assert empty.to_pylist() == []
 
 
 def test_catalog_discovery_submits_no_query(services, query_probe):
@@ -360,8 +357,9 @@ def test_deployment_rejects_near_miss_role_and_workgroup_names(deployment, seat,
 
 
 def test_deployment_rejects_cross_account_runtime_role(deployment):
-    deployment["seats"]["research"]["role_arn"] = (
-        "arn:aws:iam::111111111111:role/ck-datalake-tst-ckdata-reader"
+    role = deployment["seats"]["research"]["role_arn"]
+    deployment["seats"]["research"]["role_arn"] = role.replace(
+        "::000000000000:", "::111111111111:", 1
     )
     with pytest.raises(RuntimeError):
         probe.validate_deployment(deployment)

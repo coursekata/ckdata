@@ -47,8 +47,30 @@ def test_ci_success_must_belong_to_the_tagged_commit():
     with tempfile.TemporaryDirectory(prefix="ckdata-workflow-test-") as directory:
         directory = Path(directory)
         for name, body in {
-            "git": "print('synthetic-tagged-commit')",
-            "gh": 'import os; print(os.environ["SYNTHETIC_CI_SHA"])',
+            "git": (
+                "import sys\n"
+                'assert sys.argv[1:] == ["rev-parse", "HEAD"], sys.argv\n'
+                'print("synthetic-tagged-commit")'
+            ),
+            "gh": (
+                "import os, re, sys\n"
+                "from urllib.parse import parse_qs, urlsplit\n"
+                "arguments = sys.argv[1:]\n"
+                'assert arguments.pop(0) == "api", sys.argv\n'
+                'arguments.remove("--paginate")\n'
+                'selector_index = arguments.index("--jq")\n'
+                "selector = arguments.pop(selector_index + 1)\n"
+                "arguments.pop(selector_index)\n"
+                "assert len(arguments) == 1, sys.argv\n"
+                "endpoint = urlsplit(arguments[0])\n"
+                'assert endpoint.path == "repos/synthetic/client/actions/workflows/ci.yml/runs", endpoint\n'
+                "query = parse_qs(endpoint.query)\n"
+                'for key, value in {"head_sha": "synthetic-tagged-commit", "event": "push", "status": "success"}.items():\n'
+                "    assert query.get(key) == [value], query\n"
+                'normalized = "".join(re.findall(r\'"[^"]*"|\\S\', selector))\n'
+                "assert normalized == '.workflow_runs[]|select(.head_branch==\"main\")|.head_sha', selector\n"
+                'print(os.environ["SYNTHETIC_CI_SHA"])'
+            ),
         }.items():
             command = directory / name
             command.write_text("#!/usr/bin/env python3\n" + body + "\n")
@@ -84,7 +106,9 @@ def test_tag_checks_every_manifest_and_main_ancestry():
             shutil.copyfile(ROOT / relative, target)
         command = directory / "git"
         command.write_text(
-            '#!/usr/bin/env python3\nimport os\nraise SystemExit(int(os.environ.get("SYNTHETIC_GIT_STATUS", "0")))\n'
+            "#!/usr/bin/env python3\nimport os, sys\n"
+            'assert sys.argv[1:] == ["merge-base", "--is-ancestor", "synthetic-commit", "origin/main"], sys.argv\n'
+            'raise SystemExit(int(os.environ.get("SYNTHETIC_GIT_STATUS", "0")))\n'
         )
         command.chmod(0o700)
         with (ROOT / "core/Cargo.toml").open("rb") as manifest:
@@ -94,7 +118,8 @@ def test_tag_checks_every_manifest_and_main_ancestry():
             "GITHUB_REF_NAME": f"v{version}",
             "GITHUB_SHA": "synthetic-commit",
         }
-        assert run_script(script, env=env, cwd=directory).returncode == 0
+        result = run_script(script, env=env, cwd=directory)
+        assert result.returncode == 0, result.stderr
         assert (
             run_script(
                 script, env={**env, "SYNTHETIC_GIT_STATUS": "1"}, cwd=directory

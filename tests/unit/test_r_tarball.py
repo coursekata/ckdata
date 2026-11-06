@@ -23,10 +23,18 @@ def test_self_contained_r_tarball(tmp_path, kind):
         if kind in {"symlink", "hardlink"}:
             entry = tarfile.TarInfo("ckdata/link")
             entry.type = tarfile.SYMTYPE if kind == "symlink" else tarfile.LNKTYPE
-            entry.linkname = name
+            entry.linkname = name.removeprefix("ckdata/") if kind == "symlink" else name
             archive.addfile(entry)
+    if kind in {"symlink", "hardlink"}:
+        with tarfile.open(path, "r:gz") as archive:
+            assert archive.extractfile("ckdata/link").read() == b"x"
     if kind == "valid":
         check_tarball(path)
     else:
-        with pytest.raises(ValueError):
+        message = (
+            "must not contain links"
+            if kind in {"symlink", "hardlink"}
+            else "does not carry the core"
+        )
+        with pytest.raises(ValueError, match=message):
             check_tarball(path)
