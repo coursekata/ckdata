@@ -224,6 +224,15 @@ impl Connection {
         &self.options
     }
 
+    /// Select another schema while sharing the same credentials and fixed role
+    /// lease. This does not authenticate again or extend the session lifetime.
+    pub fn with_schema(&self, schema: &str) -> Result<Self, Error> {
+        let mut connection = self.clone();
+        connection.options.schema = schema.to_owned();
+        connection.options.validate()?;
+        Ok(connection)
+    }
+
     /// Inspect the selected identity without submitting a data query. Credential
     /// values are never returned. This is useful for acceptance-environment fences.
     pub async fn caller_identity(&self) -> Result<CallerIdentity, Error> {

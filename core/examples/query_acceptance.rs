@@ -538,6 +538,123 @@ async fn check_extended_schemas(connection: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+async fn check_deployment(
+    base: &SdkConfig,
+    deployment: &Deployment,
+) -> Result<Vec<Connection>, String> {
+    let operator = Connection::connect_with_config(
+        ConnectionOptions::new("synthetic-identity-check", &deployment.database),
+        base.clone(),
+    )
+    .await
+    .map_err(safe_core_error)?;
+    let identity = operator.caller_identity().await.map_err(safe_core_error)?;
+    require(
+        deployment
+            .operator_role_arns
+            .iter()
+            .any(|role| operator_matches(&identity, role)),
+        "operator identity is not admitted by the synthetic deployment",
+    )?;
+    let mut connections = Vec::new();
+    for (name, seat) in &deployment.seats {
+        connections.push(check_seat(base, deployment, name, seat).await?);
+    }
+    Ok(connections)
+}
+
+async fn check_seat(
+    base: &SdkConfig,
+    deployment: &Deployment,
+    name: &str,
+    seat: &Seat,
+) -> Result<Connection, String> {
+    let mut config = base.clone();
+    if let Some(source) = &seat.source_role_arn {
+        config = source_role(config, source).await?;
+        let source_connection = Connection::connect_with_config(
+            ConnectionOptions::new("synthetic-identity-check", &deployment.database),
+            config.clone(),
+        )
+        .await
+        .map_err(safe_core_error)?;
+        require(
+            identity_matches(
+                &source_connection
+                    .caller_identity()
+                    .await
+                    .map_err(safe_core_error)?,
+                &deployment.account_id,
+                source,
+            ),
+            "synthetic source identity differs",
+        )?;
+    }
+    let mut options = ConnectionOptions::new(&seat.workgroup, &deployment.database);
+    options.role_arn = Some(seat.role_arn.clone());
+    let connection = Connection::connect_with_config(options, config)
+        .await
+        .map_err(safe_core_error)?;
+    require(
+        identity_matches(
+            &connection
+                .caller_identity()
+                .await
+                .map_err(safe_core_error)?,
+            &deployment.account_id,
+            &seat.role_arn,
+        ),
+        "synthetic reader identity differs",
+    )?;
+    let workgroup = connection
+        .workgroup_configuration()
+        .await
+        .map_err(safe_core_error)?;
+    validate_workgroup(&workgroup, seat, &deployment.account_id)?;
+    println!("PASS {name}: expected synthetic account, reader and workgroup fence");
+    checks(&connection, Some(&deployment.table), true).await?;
+    Ok(connection)
+}
+
+async fn check_role_expiry(connections: Vec<Connection>) -> Result<(), String> {
+    let remaining = connections
+        .iter()
+        .map(|connection| match connection.session_status() {
+            Ok(
+                SessionStatus::Assumed { remaining, .. }
+                | SessionStatus::Expiring { remaining, .. },
+            ) => Ok(remaining),
+            _ => Err("connection has no active explicit-role lease"),
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .max()
+        .unwrap_or_default();
+    println!("INFO waiting for actual one-hour role expiry; no renewal or queries during the wait");
+    tokio::time::sleep(remaining + Duration::from_secs(1)).await;
+    for connection in connections {
+        require(
+            matches!(
+                connection
+                    .query(
+                        "SELECT 1",
+                        &QueryOptions::default(),
+                        &QueryCancellation::new()
+                    )
+                    .await,
+                Err(Error::QueryInterrupted {
+                    query_id: None,
+                    reason: QueryInterruption::SessionExpired,
+                    ..
+                })
+            ),
+            "expired role did not reject a new query before submission",
+        )?;
+    }
+    println!("PASS actual assumed-role expiry rejects new queries");
+    Ok(())
+}
+
 async fn load_sdk_config(profile: Option<String>, region: Option<String>) -> SdkConfig {
     let mut loader = aws_config::defaults(BehaviorVersion::latest());
     if let Some(profile) = profile {
@@ -590,69 +707,8 @@ where
         .map(|deployment| deployment.region.clone())
         .or(args.region);
     let base = load(args.profile, region).await;
-    let mut connections = Vec::new();
-    if let Some(deployment) = deployment {
-        let operator = Connection::connect_with_config(
-            ConnectionOptions::new("synthetic-identity-check", &deployment.database),
-            base.clone(),
-        )
-        .await
-        .map_err(safe_core_error)?;
-        let identity = operator.caller_identity().await.map_err(safe_core_error)?;
-        require(
-            deployment
-                .operator_role_arns
-                .iter()
-                .any(|role| operator_matches(&identity, role)),
-            "operator identity is not admitted by the synthetic deployment",
-        )?;
-        for (name, seat) in deployment.seats {
-            let mut config = base.clone();
-            if let Some(source) = &seat.source_role_arn {
-                config = source_role(config, source).await?;
-                let source_connection = Connection::connect_with_config(
-                    ConnectionOptions::new("synthetic-identity-check", &deployment.database),
-                    config.clone(),
-                )
-                .await
-                .map_err(safe_core_error)?;
-                require(
-                    identity_matches(
-                        &source_connection
-                            .caller_identity()
-                            .await
-                            .map_err(safe_core_error)?,
-                        &deployment.account_id,
-                        source,
-                    ),
-                    "synthetic source identity differs",
-                )?;
-            }
-            let mut options = ConnectionOptions::new(&seat.workgroup, &deployment.database);
-            options.role_arn = Some(seat.role_arn.clone());
-            let connection = Connection::connect_with_config(options, config)
-                .await
-                .map_err(safe_core_error)?;
-            require(
-                identity_matches(
-                    &connection
-                        .caller_identity()
-                        .await
-                        .map_err(safe_core_error)?,
-                    &deployment.account_id,
-                    &seat.role_arn,
-                ),
-                "synthetic reader identity differs",
-            )?;
-            let workgroup = connection
-                .workgroup_configuration()
-                .await
-                .map_err(safe_core_error)?;
-            validate_workgroup(&workgroup, &seat, &deployment.account_id)?;
-            println!("PASS {name}: expected synthetic account, reader and workgroup fence");
-            checks(&connection, Some(&deployment.table), true).await?;
-            connections.push(connection);
-        }
+    let connections = if let Some(deployment) = deployment {
+        check_deployment(&base, &deployment).await?
     } else {
         let mut options = ConnectionOptions::new(
             args.workgroup.ok_or("missing workgroup")?,
@@ -678,46 +734,10 @@ where
             "final-acceptance identity differs; no data query submitted",
         )?;
         checks(&connection, args.table.as_deref(), false).await?;
-        connections.push(connection);
-    }
+        vec![connection]
+    };
     if args.wait_for_expiry {
-        let remaining = connections
-            .iter()
-            .map(|connection| match connection.session_status() {
-                Ok(
-                    SessionStatus::Assumed { remaining, .. }
-                    | SessionStatus::Expiring { remaining, .. },
-                ) => Ok(remaining),
-                _ => Err("connection has no active explicit-role lease"),
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .unwrap_or_default();
-        println!(
-            "INFO waiting for actual one-hour role expiry; no renewal or queries during the wait"
-        );
-        tokio::time::sleep(remaining + Duration::from_secs(1)).await;
-        for connection in connections {
-            require(
-                matches!(
-                    connection
-                        .query(
-                            "SELECT 1",
-                            &QueryOptions::default(),
-                            &QueryCancellation::new()
-                        )
-                        .await,
-                    Err(Error::QueryInterrupted {
-                        query_id: None,
-                        reason: QueryInterruption::SessionExpired,
-                        ..
-                    })
-                ),
-                "expired role did not reject a new query before submission",
-            )?;
-        }
-        println!("PASS actual assumed-role expiry rejects new queries");
+        check_role_expiry(connections).await?;
     }
     Ok(())
 }
@@ -775,8 +795,11 @@ mod tests {
         check_probe_batches(&batch.schema(), &[batch.slice(1, 1), batch.slice(0, 1)]).unwrap();
     }
     #[test]
-    fn help_and_live_gate_require_no_aws_configuration() {
-        assert!(Args::try_parse_from(["probe", "--help"]).is_err());
+    fn cli_displays_help_and_requires_explicit_live_opt_in() {
+        let help = Args::try_parse_from(["probe", "--help"]).unwrap_err();
+        assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
+        assert!(!help.use_stderr());
+        assert_eq!(help.exit_code(), 0);
         let args = Args::try_parse_from([
             "probe",
             "--workgroup",
@@ -948,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn live_workgroup_drift_rejects_before_query_submission() {
+    fn workgroup_validation_rejects_configuration_drift() {
         let seat = fixture_seat();
         let config = fixture_workgroup();
         assert!(validate_workgroup(&config, &seat, "000000000000").is_ok());
@@ -985,11 +1008,7 @@ mod tests {
             missing_encryption,
         ];
         for changed in changes {
-            let submissions = std::cell::Cell::new(0);
-            let result = validate_workgroup(&changed, &seat, "000000000000")
-                .map(|()| submissions.set(submissions.get() + 1));
-            assert!(result.is_err());
-            assert_eq!(submissions.get(), 0);
+            assert!(validate_workgroup(&changed, &seat, "000000000000").is_err());
         }
     }
 
@@ -1036,6 +1055,8 @@ mod tests {
                     ("text/xml", assumed),
                     ("text/xml", reader),
                     ("application/x-amz-json-1.1", group.as_str()),
+                    // Keep the first forbidden attempt visible in the trace.
+                    ("application/x-amz-json-1.1", "{}"),
                 ]
                 .into_iter()
                 .map(|(kind, body)| {

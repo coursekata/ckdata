@@ -32,6 +32,7 @@ pub enum Error {
         code: String,
         message: Option<String>,
         request_token: String,
+        outcome_unknown: bool,
     },
     #[error("Athena query {query_id} failed: {reason}")]
     QueryFailed { query_id: String, reason: String },
@@ -52,6 +53,32 @@ pub enum Error {
         #[source]
         source: Box<Error>,
     },
+}
+
+impl Error {
+    /// Whether a query may still be running after this failure. Hosts should
+    /// preserve this warning even when another condition caused their cleanup.
+    pub fn remote_query_may_be_running(&self) -> bool {
+        match self {
+            Self::QuerySubmission {
+                outcome_unknown, ..
+            } => *outcome_unknown,
+            Self::QueryInterrupted { cancellation, .. } => {
+                *cancellation == crate::CancellationStatus::Unconfirmed
+            }
+            Self::SchemaRecovery { source, .. } => source.remote_query_may_be_running(),
+            _ => false,
+        }
+    }
+
+    /// Retain cancellation status through nested empty-schema recovery errors.
+    pub fn cancellation_status(&self) -> Option<crate::CancellationStatus> {
+        match self {
+            Self::QueryInterrupted { cancellation, .. } => Some(*cancellation),
+            Self::SchemaRecovery { source, .. } => source.cancellation_status(),
+            _ => None,
+        }
+    }
 }
 
 /// Copy modeled service guidance, excluding authentication diagnostics that can
@@ -88,6 +115,43 @@ pub(crate) fn message_suffix(message: &Option<String>) -> String {
 mod tests {
     use super::*;
     use aws_smithy_types::error::ErrorMetadata;
+
+    #[test]
+    fn cancellation_metadata_survives_schema_recovery() {
+        for cancellation in [
+            crate::CancellationStatus::NotSubmitted,
+            crate::CancellationStatus::Requested,
+            crate::CancellationStatus::Unconfirmed,
+        ] {
+            let error = Error::SchemaRecovery {
+                query_id: "original".into(),
+                source: Box::new(Error::QueryInterrupted {
+                    query_id: Some("recovery".into()),
+                    reason: crate::QueryInterruption::Cancelled,
+                    cancellation,
+                }),
+            };
+            assert_eq!(error.cancellation_status(), Some(cancellation));
+            assert_eq!(
+                error.remote_query_may_be_running(),
+                cancellation == crate::CancellationStatus::Unconfirmed
+            );
+        }
+    }
+
+    #[test]
+    fn submission_uncertainty_is_independent_of_service_message() {
+        for outcome_unknown in [false, true] {
+            let error = Error::QuerySubmission {
+                code: "synthetic".into(),
+                message: Some("outcome unknown in user-facing guidance".into()),
+                request_token: "synthetic".into(),
+                outcome_unknown,
+            };
+            assert_eq!(error.remote_query_may_be_running(), outcome_unknown);
+            assert_eq!(error.cancellation_status(), None);
+        }
+    }
 
     #[test]
     fn modeled_guidance_is_displayed_without_exposing_authentication_details() {

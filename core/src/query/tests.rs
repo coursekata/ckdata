@@ -3,6 +3,9 @@ use aws_config::BehaviorVersion;
 use aws_config::retry::RetryConfig;
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_sdk_athena::types::{
+    EncryptionConfiguration, QueryExecutionStatistics, WorkGroupConfiguration,
+};
 use aws_smithy_async::time::StaticTimeSource;
 use aws_smithy_http_client::test_util::{
     NeverClient, ReplayEvent, StaticReplayClient, infallible_client_fn,
@@ -103,6 +106,265 @@ fn query_text_preserves_sql_and_only_removes_a_terminal_delimiter() {
     assert_eq!(query_text("  SELECT 1;  ").unwrap(), "SELECT 1");
     for sql in ["", "  ", ";"] {
         assert!(matches!(query_text(sql), Err(Error::InvalidQuery(_))));
+    }
+}
+
+fn destination_configuration() -> ResultConfiguration {
+    ResultConfiguration::builder()
+        .output_location(OUTPUT)
+        .encryption_configuration(
+            EncryptionConfiguration::builder()
+                .encryption_option(EncryptionOption::SseS3)
+                .build()
+                .unwrap(),
+        )
+        .expected_bucket_owner("000000000000")
+        .build()
+}
+
+fn destination_workgroup(configuration: Option<ResultConfiguration>) -> WorkGroup {
+    WorkGroup::builder()
+        .name("synthetic")
+        .state(WorkGroupState::Enabled)
+        .configuration(
+            WorkGroupConfiguration::builder()
+                .set_result_configuration(configuration)
+                .build(),
+        )
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn destination_requires_an_enabled_workgroup_and_valid_output_settings() {
+    assert!(matches!(
+        QueryDestination::new(None, "token"),
+        Err(Error::InvalidServiceResponse("GetWorkGroup"))
+    ));
+    let mut workgroup = destination_workgroup(Some(destination_configuration()));
+    for state in [None, Some(WorkGroupState::Disabled)] {
+        workgroup.state = state;
+        assert!(matches!(
+            QueryDestination::new(Some(&workgroup), "token"),
+            Err(Error::InvalidSetting("workgroup must be enabled"))
+        ));
+    }
+    let mut workgroup = destination_workgroup(None);
+    for configuration in [workgroup.configuration.take(), None] {
+        workgroup.configuration = configuration;
+        assert!(matches!(
+            QueryDestination::new(Some(&workgroup), "token"),
+            Err(Error::InvalidSetting("workgroup result configuration"))
+        ));
+    }
+    for output in [
+        None,
+        Some(""),
+        Some("s3://synthetic-results/path/../other/"),
+    ] {
+        let configuration = ResultConfiguration::builder()
+            .set_output_location(output.map(str::to_owned))
+            .build();
+        let workgroup = destination_workgroup(Some(configuration));
+        assert!(matches!(
+            QueryDestination::new(Some(&workgroup), "token"),
+            Err(Error::InvalidSetting("workgroup output location"))
+        ));
+    }
+    for (output, prefix) in [
+        (
+            "s3://synthetic-results/path",
+            "s3://synthetic-results/path/",
+        ),
+        (
+            "s3://synthetic-results/path//",
+            "s3://synthetic-results/path//",
+        ),
+    ] {
+        let configuration = ResultConfiguration::builder()
+            .output_location(output)
+            .build();
+        let workgroup = destination_workgroup(Some(configuration.clone()));
+        let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+        assert_eq!(destination.data_prefix, format!("{prefix}ckdata/token/"));
+        assert_eq!(destination.configuration.output_location(), Some(output));
+    }
+}
+
+#[test]
+fn destination_accepts_only_verifiable_server_side_encryption() {
+    for (option, key, expected_error) in [
+        (EncryptionOption::SseS3, None, None),
+        (
+            EncryptionOption::SseKms,
+            Some("12345678-1234-1234-1234-123456789abc"),
+            None,
+        ),
+        (
+            EncryptionOption::CseKms,
+            None,
+            Some("workgroup encryption must use server-side encryption"),
+        ),
+        (
+            EncryptionOption::SseKms,
+            None,
+            Some("workgroup KMS key must be a key ARN or UUID"),
+        ),
+        (
+            EncryptionOption::SseKms,
+            Some("alias/synthetic"),
+            Some("workgroup KMS key must be a key ARN or UUID"),
+        ),
+    ] {
+        let mut configuration = destination_configuration();
+        configuration.encryption_configuration = Some(
+            EncryptionConfiguration::builder()
+                .encryption_option(option)
+                .set_kms_key(key.map(str::to_owned))
+                .build()
+                .unwrap(),
+        );
+        let workgroup = destination_workgroup(Some(configuration));
+        match expected_error {
+            Some(expected) => assert!(matches!(
+                QueryDestination::new(Some(&workgroup), "token"),
+                Err(Error::InvalidSetting(actual)) if actual == expected
+            )),
+            None => assert!(QueryDestination::new(Some(&workgroup), "token").is_ok()),
+        }
+    }
+}
+
+#[test]
+fn destination_allows_an_absent_or_empty_manifest_but_requires_actual_result_output() {
+    let configuration = destination_configuration();
+    let workgroup = destination_workgroup(Some(configuration.clone()));
+    let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+    for statistics in [
+        None,
+        Some(QueryExecutionStatistics::builder().build()),
+        Some(
+            QueryExecutionStatistics::builder()
+                .data_manifest_location("")
+                .build(),
+        ),
+    ] {
+        let execution = AthenaQueryExecution::builder()
+            .result_configuration(configuration.clone())
+            .set_statistics(statistics)
+            .build();
+        let completed = destination.complete(QUERY_ID, &execution).unwrap();
+        assert_eq!(completed.query_id, QUERY_ID);
+        assert_eq!(completed.manifest_location, None);
+        assert_eq!(completed.data_prefix, format!("{OUTPUT}ckdata/token/"));
+    }
+    let mut missing_output = configuration.clone();
+    missing_output.output_location = None;
+    let mut empty_output = configuration;
+    empty_output.output_location = Some(String::new());
+    for actual in [None, Some(missing_output), Some(empty_output)] {
+        let execution = AthenaQueryExecution::builder()
+            .set_result_configuration(actual)
+            .build();
+        assert!(matches!(
+            destination.complete(QUERY_ID, &execution),
+            Err(QueryInterruption::InvalidResponse(
+                "query result configuration"
+            ))
+        ));
+    }
+}
+
+#[test]
+fn destination_uses_the_same_output_boundary_for_manifest_and_result_locations() {
+    let configuration = destination_configuration();
+    let workgroup = destination_workgroup(Some(configuration.clone()));
+    let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+    for (location, valid) in [
+        (format!("{OUTPUT}query.txt"), true),
+        (format!("{OUTPUT}nested/query.txt"), true),
+        (
+            "s3://synthetic-results/results/readers/query.txt".into(),
+            false,
+        ),
+        (
+            "s3://other-synthetic/results/reader/query.txt".into(),
+            false,
+        ),
+        (format!("{OUTPUT}../query.txt"), false),
+        (format!("{OUTPUT}%2e%2e/query.txt"), false),
+        (format!("{OUTPUT}query.txt?query"), false),
+        (format!("{OUTPUT}query.txt\n"), false),
+        ("https://synthetic/results/reader/query.txt".into(), false),
+    ] {
+        let execution = AthenaQueryExecution::builder()
+            .result_configuration(configuration.clone())
+            .statistics(
+                QueryExecutionStatistics::builder()
+                    .data_manifest_location(&location)
+                    .build(),
+            )
+            .build();
+        let result = destination.complete(QUERY_ID, &execution);
+        assert_eq!(result.is_ok(), valid, "manifest {location:?}");
+        if !valid {
+            assert!(matches!(
+                result,
+                Err(QueryInterruption::InvalidResponse("manifest location"))
+            ));
+        }
+        let mut actual = configuration.clone();
+        actual.output_location = Some(location.clone());
+        let execution = AthenaQueryExecution::builder()
+            .result_configuration(actual)
+            .build();
+        let result = destination.complete(QUERY_ID, &execution);
+        assert_eq!(result.is_ok(), valid, "result {location:?}");
+        if !valid {
+            assert!(matches!(
+                result,
+                Err(QueryInterruption::InvalidResponse(
+                    "query result configuration"
+                ))
+            ));
+        }
+    }
+}
+
+#[test]
+fn destination_requires_matching_encryption_and_bucket_owner() {
+    let configuration = destination_configuration();
+    let workgroup = destination_workgroup(Some(configuration.clone()));
+    let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+    let mut no_encryption = configuration.clone();
+    no_encryption.encryption_configuration = None;
+    let mut different_encryption = configuration.clone();
+    different_encryption.encryption_configuration = Some(
+        EncryptionConfiguration::builder()
+            .encryption_option(EncryptionOption::SseKms)
+            .kms_key("12345678-1234-1234-1234-123456789abc")
+            .build()
+            .unwrap(),
+    );
+    let mut no_owner = configuration.clone();
+    no_owner.expected_bucket_owner = None;
+    let mut different_owner = configuration;
+    different_owner.expected_bucket_owner = Some("111111111111".into());
+    for actual in [
+        no_encryption,
+        different_encryption,
+        no_owner,
+        different_owner,
+    ] {
+        let execution = AthenaQueryExecution::builder()
+            .result_configuration(actual)
+            .build();
+        assert!(matches!(
+            destination.complete(QUERY_ID, &execution),
+            Err(QueryInterruption::InvalidResponse(
+                "query result configuration"
+            ))
+        ));
     }
 }
 
@@ -259,6 +521,7 @@ async fn deadline_stops_the_submitted_query_and_preserves_timeout_if_stop_fails(
         let options = QueryOptions {
             timeout: Duration::from_secs(2),
             poll_interval: Duration::from_secs(10),
+            ..QueryOptions::default()
         };
         let error = connection(http.clone())
             .await
@@ -361,16 +624,108 @@ async fn submission_errors_retain_token_and_modeled_guidance_without_signature_d
             .await
             .unwrap_err();
         assert!(!format!("{error:?} {error}").contains("synthetic signed authentication detail"));
-        if let Error::QuerySubmission { code, message, .. } = &error {
-            assert_eq!(message.as_deref(), expected_message);
-            if let Some(expected_code) = expected_code {
-                assert_eq!(code, &expected_code);
-            }
+        let Error::QuerySubmission {
+            code,
+            message,
+            request_token,
+            outcome_unknown,
+        } = &error
+        else {
+            panic!("expected a submission failure, got {error:?}");
+        };
+        assert_eq!(message.as_deref(), expected_message);
+        assert_eq!(*outcome_unknown, expected_code.is_none());
+        assert_eq!(error.remote_query_may_be_running(), *outcome_unknown);
+        if let Some(expected_code) = expected_code {
+            assert_eq!(code, &expected_code);
+        } else {
+            assert_eq!(code, "missing query ID; submission outcome unknown");
         }
-        assert!(
-            matches!(error, Error::QuerySubmission { request_token, .. } if requests(&http)[1].1["ClientRequestToken"] == request_token)
-        );
+        assert_eq!(requests(&http)[1].1["ClientRequestToken"], *request_token);
     }
+}
+
+#[tokio::test]
+async fn submission_transport_failure_retains_token_and_marks_the_outcome_unknown() {
+    use aws_smithy_http_client::test_util::dvr::RecordingClient;
+
+    // Record the attempted submission even though it exhausts the replay and
+    // receives a connector error instead of a service response.
+    let http = RecordingClient::new(replay(vec![(200, workgroup())]));
+    let connection = Connection::from_config(
+        ConnectionOptions::new("synthetic", "synthetic_schema"),
+        config().http_client(http.clone()).build(),
+    )
+    .await
+    .unwrap();
+    let error = connection
+        .execute_unload(
+            "SELECT 1",
+            &QueryOptions::default(),
+            &QueryCancellation::new(),
+        )
+        .await
+        .unwrap_err();
+    let Error::QuerySubmission {
+        code,
+        message,
+        request_token,
+        outcome_unknown,
+    } = &error
+    else {
+        panic!("expected a submission failure, got {error:?}");
+    };
+    assert_eq!(code, "request failed; submission outcome unknown");
+    assert_eq!(message, &None);
+    assert!(Uuid::parse_str(request_token).is_ok());
+    assert!(*outcome_unknown);
+    assert!(error.remote_query_may_be_running());
+    // The recorder copies request bodies in a background task. Wait for the
+    // failed submission's complete body before checking its idempotency token.
+    let events = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let traffic = serde_json::to_value(http.network_traffic()).unwrap();
+            let events = traffic["events"].as_array().unwrap();
+            if events.iter().any(|event| {
+                event["connection_id"].as_u64() == Some(1)
+                    && event["action"]["Eof"]["direction"] == "Request"
+            }) {
+                break events.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the recorder must capture the failed submission body");
+    assert_eq!(
+        events
+            .iter()
+            .filter_map(|event| event["action"].get("Request"))
+            .map(|request| {
+                request["request"]["headers"]["x-amz-target"][0]
+                    .as_str()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>(),
+        [
+            "AmazonAthena.GetWorkGroup",
+            "AmazonAthena.StartQueryExecution"
+        ]
+    );
+    let body = events
+        .iter()
+        .filter(|event| {
+            event["connection_id"].as_u64() == Some(1)
+                && event["action"]["Data"]["direction"] == "Request"
+        })
+        .map(|event| event["action"]["Data"]["data"]["Utf8"].as_str().unwrap())
+        .collect::<String>();
+    let submitted: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(submitted["ClientRequestToken"], *request_token);
+    assert!(events.iter().any(|event| {
+        event["connection_id"].as_u64() == Some(1)
+            && event["action"]["Response"]["response"]["Err"].is_string()
+    }));
 }
 
 #[tokio::test]
@@ -440,18 +795,6 @@ async fn invalid_workgroup_settings_fail_before_submission() {
             Err(Error::InvalidSetting(_))
         ));
         assert_eq!(requests(&http).len(), 1);
-    }
-    assert_eq!(
-        s3_prefix("s3://synthetic-results/path//"),
-        Some("s3://synthetic-results/path//".into())
-    );
-    for invalid in [
-        "https://synthetic/results/",
-        "s3://synthetic/path/../other/",
-        "s3://synthetic/path?query",
-        "s3://synthetic/path\n",
-    ] {
-        assert!(!s3_location(invalid));
     }
 }
 

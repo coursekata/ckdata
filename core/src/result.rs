@@ -114,7 +114,8 @@ impl Connection {
                     .map_err(|source| Error::SchemaRecovery {
                         query_id: execution.query_id.clone(),
                         source: Box::new(source),
-                    })?,
+                    })?
+                    .1,
             )
         } else {
             None
@@ -170,17 +171,7 @@ impl Connection {
                 ResultError::InvalidSchema("result has no Parquet schema"),
             )
         })?;
-        let mut warnings = Vec::new();
-        if let crate::SessionStatus::Expiring { remaining, .. } =
-            self.session_status().map_err(|_| {
-                result_error(
-                    &execution.query_id,
-                    ResultError::Interrupted(QueryInterruption::SessionExpired),
-                )
-            })?
-        {
-            warnings.push(QueryWarning::SessionExpiring { remaining });
-        }
+        let warnings = self.result_warnings(&execution.query_id)?;
         Ok(QueryResult {
             query_id: execution.query_id,
             schema,
@@ -189,12 +180,54 @@ impl Connection {
         })
     }
 
+    /// Obtain a typed empty result without executing the data-producing query.
+    /// Used for zero-length DBI parameter sets. This uses the same Parquet
+    /// schema recovery as fileless query results, with the supplied parameters.
+    pub async fn query_empty(
+        &self,
+        sql: &str,
+        options: &QueryOptions,
+        cancellation: &QueryCancellation,
+    ) -> Result<QueryResult, Error> {
+        options.validate()?;
+        let guard = RequestGuard {
+            connection: self,
+            cancellation,
+            deadline: Instant::now() + options.timeout,
+        };
+        let (query_id, schema) = self
+            .recover_empty_schema(crate::query::query_text(sql)?, options, &guard)
+            .await?;
+        let warnings = self.result_warnings(&query_id)?;
+        Ok(QueryResult {
+            query_id,
+            schema,
+            batches: Vec::new(),
+            warnings,
+        })
+    }
+
+    fn result_warnings(&self, query_id: &str) -> Result<Vec<QueryWarning>, Error> {
+        let mut warnings = Vec::new();
+        if let crate::SessionStatus::Expiring { remaining, .. } =
+            self.session_status().map_err(|_| {
+                result_error(
+                    query_id,
+                    ResultError::Interrupted(QueryInterruption::SessionExpired),
+                )
+            })?
+        {
+            warnings.push(QueryWarning::SessionExpiring { remaining });
+        }
+        Ok(warnings)
+    }
+
     async fn recover_empty_schema(
         &self,
         sql: &str,
         options: &QueryOptions,
         guard: &RequestGuard<'_>,
-    ) -> Result<SchemaRef, Error> {
+    ) -> Result<(String, SchemaRef), Error> {
         // LIMIT belongs outside the complete original query. The singleton
         // join supplies typed NULLs even when Athena otherwise writes no files.
         // Only this Parquet schema is used; no recovery rows are decoded.
@@ -239,12 +272,14 @@ impl Connection {
                 schema = Some(recovered);
             }
         }
-        schema.ok_or_else(|| {
-            result_error(
-                &execution.query_id,
-                ResultError::InvalidSchema("empty-result recovery produced no Parquet schema"),
-            )
-        })
+        schema
+            .map(|schema| (execution.query_id.clone(), schema))
+            .ok_or_else(|| {
+                result_error(
+                    &execution.query_id,
+                    ResultError::InvalidSchema("empty-result recovery produced no Parquet schema"),
+                )
+            })
     }
 }
 

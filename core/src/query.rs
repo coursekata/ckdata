@@ -5,8 +5,8 @@ use aws_sdk_athena::Client;
 use aws_sdk_athena::config::timeout::TimeoutConfig;
 use aws_sdk_athena::error::ProvideErrorMetadata;
 use aws_sdk_athena::types::{
-    EncryptionOption, QueryExecutionContext, QueryExecutionState, ResultConfiguration,
-    WorkGroupState,
+    EncryptionOption, QueryExecution as AthenaQueryExecution, QueryExecutionContext,
+    QueryExecutionState, ResultConfiguration, WorkGroup, WorkGroupState,
 };
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use uuid::Uuid;
@@ -22,6 +22,8 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct QueryOptions {
     pub timeout: Duration,
     pub poll_interval: Duration,
+    /// Positional Athena parameter expressions, kept separate from the SQL.
+    pub execution_parameters: Vec<String>,
 }
 
 impl Default for QueryOptions {
@@ -29,6 +31,7 @@ impl Default for QueryOptions {
         Self {
             timeout: Duration::from_secs(30 * 60),
             poll_interval: Duration::from_secs(1),
+            execution_parameters: Vec::new(),
         }
     }
 }
@@ -155,93 +158,16 @@ impl Connection {
             })
             .await
             .map_err(before_submission)?;
-        let workgroup = workgroup
-            .work_group()
-            .ok_or(Error::InvalidServiceResponse("GetWorkGroup"))?;
-        if workgroup.state() != Some(&WorkGroupState::Enabled) {
-            return Err(Error::InvalidSetting("workgroup must be enabled"));
-        }
-        let configuration = workgroup
-            .configuration()
-            .and_then(|config| config.result_configuration())
-            .ok_or(Error::InvalidSetting("workgroup result configuration"))?;
-        let output = configuration
-            .output_location()
-            .ok_or(Error::InvalidSetting("workgroup output location"))?;
-        let output = s3_prefix(output).ok_or(Error::InvalidSetting("workgroup output location"))?;
-        if configuration
-            .encryption_configuration()
-            .is_some_and(|encryption| {
-                !matches!(
-                    encryption.encryption_option(),
-                    EncryptionOption::SseS3 | EncryptionOption::SseKms
-                )
-            })
-        {
-            return Err(Error::InvalidSetting(
-                "workgroup encryption must use server-side encryption",
-            ));
-        }
-        if configuration
-            .encryption_configuration()
-            .is_some_and(|encryption| {
-                encryption.encryption_option() == &EncryptionOption::SseKms
-                    && encryption
-                        .kms_key()
-                        .is_none_or(|key| !crate::result::transport::valid_kms_key(key))
-            })
-        {
-            return Err(Error::InvalidSetting(
-                "workgroup KMS key must be a key ARN or UUID",
-            ));
-        }
         let request_token = Uuid::new_v4().to_string();
-        let data_prefix = format!("{output}ckdata/{request_token}/");
-        let destination = QueryDestination {
-            data_prefix,
-            output_prefix: output,
-            configuration: configuration.clone(),
-        };
+        let destination = QueryDestination::new(workgroup.work_group(), &request_token)?;
         let unload = format!(
             "UNLOAD (\n{query}\n) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
             destination.data_prefix.replace('\'', "''")
         );
         guard.check().map_err(before_submission)?;
-        // Do not race cancellation against StartQueryExecution: its response is
-        // needed to stop a query accepted just before the interruption. The SDK
-        // bounds this call and retries with the same idempotency token.
-        let started = client
-            .start_query_execution()
-            .client_request_token(&request_token)
-            .query_string(unload)
-            .work_group(&self.options().workgroup)
-            .query_execution_context(
-                QueryExecutionContext::builder()
-                    .catalog("AwsDataCatalog")
-                    .database(&self.options().schema)
-                    .build(),
-            )
-            .result_configuration(destination.configuration.clone())
-            .send()
-            .await
-            .map_err(|error| Error::QuerySubmission {
-                code: error
-                    .as_service_error()
-                    .and_then(|error| error.code())
-                    .unwrap_or("request failed; submission outcome unknown")
-                    .to_owned(),
-                message: crate::error::service_message(error.as_service_error()),
-                request_token: request_token.clone(),
-            })?;
-        let query_id = started
-            .query_execution_id()
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| Error::QuerySubmission {
-                code: "missing query ID; submission outcome unknown".to_owned(),
-                message: None,
-                request_token,
-            })?
-            .to_owned();
+        let query_id = self
+            .submit_unload(&client, unload, options, &destination, &request_token)
+            .await?;
         let result = self
             .poll_query(&client, &query_id, &destination, &guard, options)
             .await;
@@ -262,6 +188,57 @@ impl Connection {
                 })
             }
         }
+    }
+
+    async fn submit_unload(
+        &self,
+        client: &Client,
+        unload: String,
+        options: &QueryOptions,
+        destination: &QueryDestination,
+        request_token: &str,
+    ) -> Result<String, Error> {
+        // Do not race cancellation against StartQueryExecution: its response is
+        // needed to stop a query accepted just before the interruption. The SDK
+        // bounds this call and retries with the same idempotency token.
+        let started = client
+            .start_query_execution()
+            .client_request_token(request_token)
+            .query_string(unload)
+            .set_execution_parameters(
+                (!options.execution_parameters.is_empty())
+                    .then(|| options.execution_parameters.clone()),
+            )
+            .work_group(&self.options().workgroup)
+            .query_execution_context(
+                QueryExecutionContext::builder()
+                    .catalog("AwsDataCatalog")
+                    .database(&self.options().schema)
+                    .build(),
+            )
+            .result_configuration(destination.configuration.clone())
+            .send()
+            .await
+            .map_err(|error| Error::QuerySubmission {
+                outcome_unknown: error.as_service_error().is_none(),
+                code: error
+                    .as_service_error()
+                    .and_then(|error| error.code())
+                    .unwrap_or("request failed; submission outcome unknown")
+                    .to_owned(),
+                message: crate::error::service_message(error.as_service_error()),
+                request_token: request_token.to_owned(),
+            })?;
+        started
+            .query_execution_id()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| Error::QuerySubmission {
+                outcome_unknown: true,
+                code: "missing query ID; submission outcome unknown".to_owned(),
+                message: None,
+                request_token: request_token.to_owned(),
+            })
+            .map(str::to_owned)
     }
 
     async fn poll_query(
@@ -304,41 +281,9 @@ impl Connection {
                 .ok_or(QueryInterruption::InvalidResponse("query status"))?;
             match status.state() {
                 Some(QueryExecutionState::Succeeded) => {
-                    let manifest = execution
-                        .statistics()
-                        .and_then(|stats| stats.data_manifest_location())
-                        .filter(|location| !location.is_empty())
-                        .map(|location| {
-                            if location.starts_with(&destination.output_prefix)
-                                && s3_location(location)
-                            {
-                                Ok(location.to_owned())
-                            } else {
-                                Err(QueryInterruption::InvalidResponse("manifest location"))
-                            }
-                        })
-                        .transpose()?;
-                    let actual = execution
-                        .result_configuration()
-                        .filter(|actual| {
-                            actual.encryption_configuration()
-                                == destination.configuration.encryption_configuration()
-                                && actual.expected_bucket_owner()
-                                    == destination.configuration.expected_bucket_owner()
-                                && actual.output_location().is_some_and(|location| {
-                                    location.starts_with(&destination.output_prefix)
-                                        && s3_location(location)
-                                })
-                        })
-                        .ok_or(QueryInterruption::InvalidResponse(
-                            "query result configuration",
-                        ))?;
-                    return Ok(QueryExecution {
-                        query_id: query_id.to_owned(),
-                        manifest_location: manifest,
-                        data_prefix: destination.data_prefix.clone(),
-                        result_configuration: actual.clone(),
-                    });
+                    return destination
+                        .complete(query_id, execution)
+                        .map_err(PollError::from);
                 }
                 Some(QueryExecutionState::Failed) => {
                     return Err(PollError::Failed(
@@ -384,6 +329,88 @@ struct QueryDestination {
     data_prefix: String,
     output_prefix: String,
     configuration: ResultConfiguration,
+}
+
+impl QueryDestination {
+    fn new(workgroup: Option<&WorkGroup>, request_token: &str) -> Result<Self, Error> {
+        let workgroup = workgroup.ok_or(Error::InvalidServiceResponse("GetWorkGroup"))?;
+        if workgroup.state() != Some(&WorkGroupState::Enabled) {
+            return Err(Error::InvalidSetting("workgroup must be enabled"));
+        }
+        let configuration = workgroup
+            .configuration()
+            .and_then(|config| config.result_configuration())
+            .ok_or(Error::InvalidSetting("workgroup result configuration"))?;
+        let output_prefix = configuration
+            .output_location()
+            .and_then(s3_prefix)
+            .ok_or(Error::InvalidSetting("workgroup output location"))?;
+        if let Some(encryption) = configuration.encryption_configuration() {
+            if !matches!(
+                encryption.encryption_option(),
+                EncryptionOption::SseS3 | EncryptionOption::SseKms
+            ) {
+                return Err(Error::InvalidSetting(
+                    "workgroup encryption must use server-side encryption",
+                ));
+            }
+            if encryption.encryption_option() == &EncryptionOption::SseKms
+                && encryption
+                    .kms_key()
+                    .is_none_or(|key| !crate::result::transport::valid_kms_key(key))
+            {
+                return Err(Error::InvalidSetting(
+                    "workgroup KMS key must be a key ARN or UUID",
+                ));
+            }
+        }
+        Ok(Self {
+            data_prefix: format!("{output_prefix}ckdata/{request_token}/"),
+            output_prefix,
+            configuration: configuration.clone(),
+        })
+    }
+
+    fn complete(
+        &self,
+        query_id: &str,
+        execution: &AthenaQueryExecution,
+    ) -> Result<QueryExecution, QueryInterruption> {
+        let manifest_location = execution
+            .statistics()
+            .and_then(|stats| stats.data_manifest_location())
+            .filter(|location| !location.is_empty())
+            .map(|location| {
+                if self.contains_output(location) {
+                    Ok(location.to_owned())
+                } else {
+                    Err(QueryInterruption::InvalidResponse("manifest location"))
+                }
+            })
+            .transpose()?;
+        let configuration = execution
+            .result_configuration()
+            .filter(|actual| {
+                actual.encryption_configuration() == self.configuration.encryption_configuration()
+                    && actual.expected_bucket_owner() == self.configuration.expected_bucket_owner()
+                    && actual
+                        .output_location()
+                        .is_some_and(|location| self.contains_output(location))
+            })
+            .ok_or(QueryInterruption::InvalidResponse(
+                "query result configuration",
+            ))?;
+        Ok(QueryExecution {
+            query_id: query_id.to_owned(),
+            manifest_location,
+            data_prefix: self.data_prefix.clone(),
+            result_configuration: configuration.clone(),
+        })
+    }
+
+    fn contains_output(&self, location: &str) -> bool {
+        location.starts_with(&self.output_prefix) && s3_location(location)
+    }
 }
 
 pub(crate) struct RequestGuard<'a> {

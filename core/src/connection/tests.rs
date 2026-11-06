@@ -1,9 +1,12 @@
 use super::*;
 use aws_config::retry::RetryConfig;
 use aws_smithy_async::time::StaticTimeSource;
-use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
+use aws_smithy_http_client::test_util::{
+    NeverClient, ReplayEvent, StaticReplayClient, infallible_client_fn,
+};
 use aws_smithy_types::body::SdkBody;
 use aws_types::os_shim_internal::{Env, Fs};
+use std::error::Error as StdError;
 
 const EPOCH: u64 = 1_704_067_200;
 const ROLE: &str = "arn:aws:iam::000000000000:role/synthetic-reader";
@@ -258,7 +261,31 @@ async fn identity_check_returns_only_account_and_arn_without_a_data_query() {
 
 #[tokio::test(start_paused = true)]
 async fn one_role_assumption_warns_at_fifteen_minutes_and_cannot_renew_at_expiry() {
-    let http = replay(200, response("2024-01-01T01:00:00Z"));
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    // A credential-free rejection keeps an unexpected renewal visible without
+    // adding an unused secret-bearing mock response to the debug output.
+    let http = StaticReplayClient::new(
+        [
+            (200, response("2024-01-01T01:00:00Z")),
+            (400, String::new()),
+        ]
+        .into_iter()
+        .map(|(status, body)| {
+            ReplayEvent::new(
+                http::Request::new(SdkBody::empty()),
+                http::Response::builder()
+                    .status(status)
+                    .header("content-type", "text/xml")
+                    .body(SdkBody::from(body))
+                    .unwrap(),
+            )
+        })
+        .collect(),
+    );
     let opts = ConnectionOptions {
         role_arn: Some(ROLE.into()),
         ..options()
@@ -280,6 +307,33 @@ async fn one_role_assumption_warns_at_fifteen_minutes_and_cannot_renew_at_expiry
             .access_key_id(),
         "ASSUMED_KEY"
     );
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let observed = attempts.clone();
+    let athena = aws_sdk_athena::Client::from_conf(
+        aws_sdk_athena::config::Builder::from(&connection.config)
+            .http_client(infallible_client_fn(move |request| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(
+                    request.headers()["x-amz-target"],
+                    "AmazonAthena.GetWorkGroup"
+                );
+                http::Response::builder()
+                    .status(200)
+                    .header("content-type", "application/x-amz-json-1.1")
+                    .body(r#"{"WorkGroup":{"Name":"synthetic","State":"ENABLED"}}"#)
+                    .unwrap()
+            }))
+            .build(),
+    );
+    let primed = tokio::time::timeout(
+        Duration::from_secs(1),
+        athena.get_work_group().work_group("synthetic").send(),
+    )
+    .await
+    .expect("the synthetic request must finish before expiry")
+    .unwrap();
+    assert_eq!(primed.work_group().unwrap().name(), "synthetic");
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
 
     tokio::time::advance(Duration::from_secs(2699)).await;
     assert!(matches!(
@@ -296,22 +350,40 @@ async fn one_role_assumption_warns_at_fifteen_minutes_and_cannot_renew_at_expiry
         Err(Error::ExpiredRole)
     ));
     assert!(matches!(clone.session_status(), Err(Error::ExpiredRole)));
-    assert!(provider.provide_credentials().await.is_err());
+    assert!(matches!(
+        provider.provide_credentials().await,
+        Err(CredentialsError::ProviderError(_))
+    ));
     assert!(provider.fallback_on_interrupt().is_none());
-    // The SDK must reject the expired snapshot before reaching even a mock
-    // connector. NeverClient panics if any HTTP request is attempted.
-    let athena = aws_sdk_athena::Client::from_conf(
-        aws_sdk_athena::config::Builder::from(&connection.config)
-            .http_client(NeverClient::new())
-            .build(),
+    // Reuse the primed client so an SDK identity cached before expiry cannot
+    // bypass the fixed lease. Bound the wait if credential resolution regresses.
+    let before_expired_request = attempts.load(Ordering::SeqCst);
+    let sent = tokio::time::timeout(
+        Duration::from_secs(1),
+        athena.get_work_group().work_group("synthetic").send(),
+    )
+    .await;
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        before_expired_request,
+        "expired credentials must prevent HTTP"
     );
-    assert!(
-        athena
-            .get_work_group()
-            .work_group("synthetic")
-            .send()
-            .await
-            .is_err()
+    let error = sent
+        .expect("expired credential rejection must finish without waiting for HTTP")
+        .expect_err("expired credentials must reject the SDK request");
+    let credentials_error =
+        std::iter::successors(Some(&error as &(dyn StdError + 'static)), |error| {
+            (*error).source()
+        })
+        .find_map(|error| error.downcast_ref::<CredentialsError>())
+        .expect("the SDK failure must retain the credential provider error");
+    assert!(matches!(
+        credentials_error,
+        CredentialsError::ProviderError(_)
+    ));
+    assert_eq!(
+        credentials_error.source().unwrap().to_string(),
+        "assumed-role session expired"
     );
     assert_eq!(
         http.actual_requests().count(),
@@ -347,12 +419,53 @@ async fn server_expiry_can_shorten_but_cannot_extend_the_one_hour_lease() {
         )
         .await
         .unwrap();
-        tokio::time::advance(Duration::from_secs(remaining)).await;
+        tokio::time::advance(Duration::from_secs(remaining - 1)).await;
+        assert!(matches!(
+            connection.session_status(),
+            Ok(SessionStatus::Expiring { remaining, .. }) if remaining == Duration::from_secs(1)
+        ));
+        assert!(
+            connection
+                .config
+                .credentials_provider()
+                .unwrap()
+                .provide_credentials()
+                .await
+                .is_ok()
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
         assert!(matches!(
             connection.session_status(),
             Err(Error::ExpiredRole)
         ));
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn selecting_a_schema_shares_the_original_role_lease_without_authenticating() {
+    let http = replay(200, response("2024-01-01T01:00:00Z"));
+    let connection = Connection::from_config(
+        ConnectionOptions {
+            role_arn: Some(ROLE.into()),
+            ..options()
+        },
+        config(http.clone()),
+    )
+    .await
+    .unwrap();
+    tokio::time::advance(Duration::from_secs(3500)).await;
+    let selected = connection.with_schema("another_schema").unwrap();
+    assert_eq!(selected.options().schema, "another_schema");
+    assert_eq!(connection.options().schema, "synthetic_schema");
+    assert_eq!(selected.region(), connection.region());
+    assert_eq!(
+        selected.session_status().unwrap(),
+        connection.session_status().unwrap()
+    );
+    assert!(connection.with_schema("").is_err());
+    tokio::time::advance(Duration::from_secs(100)).await;
+    assert!(matches!(selected.session_status(), Err(Error::ExpiredRole)));
+    assert_eq!(http.actual_requests().count(), 1);
 }
 
 #[tokio::test]
