@@ -660,7 +660,7 @@ parameter_literals <- function(conn, x) {
     as.character(DBI::dbQuoteString(conn, as.character(x)))
   } else if (rlang::is_logical(x)) {
     ifelse(x, "TRUE", "FALSE")
-  } else if (inherits(x, "integer64")) {
+  } else if (bit64::is.integer64(x)) {
     paste0("CAST(", as.character(x), " AS BIGINT)")
   } else if (rlang::is_integer(x)) {
     as.character(x)
@@ -678,7 +678,7 @@ parameter_literals <- function(conn, x) {
 
 literal_type <- function(x) {
   if (inherits(x, "AsIs")) class(x) <- setdiff(class(x), "AsIs")
-  if (inherits(x, "integer64")) {
+  if (bit64::is.integer64(x)) {
     return("BIGINT")
   }
   if (inherits(x, "difftime")) {

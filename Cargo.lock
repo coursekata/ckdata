@@ -944,6 +944,7 @@ dependencies = [
 name = "ckdata-py"
 version = "0.0.1"
 dependencies = [
+ "arrow-array",
  "ckdata",
  "pyo3",
  "pyo3-arrow",

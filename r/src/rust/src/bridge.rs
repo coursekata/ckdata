@@ -1,6 +1,8 @@
 //! R objects are created only on the R thread. Background jobs own Rust values
 //! and communicate completion through a mutex; R can process interrupts while
 //! the shared core completes a cancellation request.
+mod test_support;
+
 use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -569,79 +571,6 @@ fn native_result_clear(object: Robj) -> Result<()> {
     Ok(())
 }
 
-/// Native result fixture. Entirely offline, with the same cursor as AWS results.
-/// @noRd
-#[extendr]
-fn native_probe_result(empty: bool) -> Result<Robj> {
-    let mut result =
-        NativeResult::from_reader(ckdata::arrow_probe().map_err(failure)?).map_err(failure)?;
-    if empty {
-        result.batches.clear();
-        result.rows = 0;
-    }
-    Ok(ExternalPtr::new(result).into())
-}
-
-/// Offline workgroup fixture using the same R conversion as live metadata.
-/// @noRd
-#[extendr]
-fn native_probe_workgroup() -> List {
-    WorkgroupInfo {
-        output_location: Some(
-            "s3://ck-datalake-tst-ckdata-fixtures-000000000000/results/internal/".to_owned(),
-        ),
-        expected_bucket_owner: Some("000000000000".to_owned()),
-        encryption_option: Some("SSE_S3".to_owned()),
-        kms_key: None,
-        enforce_work_group_configuration: Some(true),
-        bytes_scanned_cutoff_per_query: Some(10 * 1024 * 1024),
-        selected_engine_version: Some("Athena engine version 3".to_owned()),
-    }
-    .into_list()
-}
-
-/// Offline table fixture, including a partition key, through live metadata conversion.
-/// @noRd
-#[extendr]
-fn native_probe_metadata() -> List {
-    let column = |name: &str, data_type: &str| ckdata::ColumnMetadata {
-        name: name.to_owned(),
-        data_type: Some(data_type.to_owned()),
-        comment: None,
-    };
-    columns(ckdata::TableMetadata {
-        name: "types".to_owned(),
-        table_type: None,
-        columns: vec![
-            column("id", "integer"),
-            column("s_null", "varchar"),
-            column("s_empty", "varchar"),
-            column("big", "bigint"),
-        ],
-        partition_keys: vec![column("ts", "timestamp")],
-    })
-}
-
-/// Offline asynchronous fixture for interrupt and task-lifetime tests.
-/// @noRd
-#[extendr]
-fn native_probe_job(milliseconds: f64) -> Result<Robj> {
-    if !milliseconds.is_finite() || !(0.0..=60000.0).contains(&milliseconds) {
-        return Err(failure("invalid fixture delay"));
-    }
-    let cancellation = QueryCancellation::new();
-    let cancel = cancellation.clone();
-    spawn(cancellation, async move {
-        tokio::select! {
-            _ = cancel.cancelled() => Err(NativeFailure::message("synthetic query cancelled")),
-            _ = tokio::time::sleep(Duration::from_secs_f64(milliseconds / 1000.0)) => {
-                NativeResult::from_reader(ckdata::arrow_probe().map_err(NativeFailure::message)?)
-                    .map(Completion::Probe).map_err(NativeFailure::message)
-            }
-        }
-    })
-}
-
 extendr_module! {
     mod bridge;
     fn native_connect;
@@ -658,10 +587,7 @@ extendr_module! {
     fn native_result_info;
     fn native_result_clear;
     fn native_result_append;
-    fn native_probe_result;
-    fn native_probe_workgroup;
-    fn native_probe_metadata;
-    fn native_probe_job;
+    use test_support;
 }
 
 #[cfg(test)]

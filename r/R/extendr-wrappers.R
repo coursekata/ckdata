@@ -9,10 +9,6 @@ NULL
 #' @noRd
 core_versions <- function() .Call(wrap__core_versions)
 
-#' Create an owned nanoarrow stream containing the core's literal probe.
-#' @noRd
-arrow_probe_stream <- function() .Call(wrap__arrow_probe_stream)
-
 #' @noRd
 native_connect <- function(workgroup, schema, profile, region, role_arn) .Call(wrap__native_connect, workgroup, schema, profile, region, role_arn)
 

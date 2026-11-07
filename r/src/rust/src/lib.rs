@@ -24,14 +24,6 @@ extern "C" fn finalize_stream(value: SEXP) {
     }
 }
 
-/// Create an owned nanoarrow stream containing the core's literal probe.
-/// @noRd
-#[extendr]
-fn arrow_probe_stream() -> extendr_api::Result<Robj> {
-    let reader = ckdata::arrow_probe().map_err(|e| Error::Other(e.to_string()))?;
-    owned_stream(reader)
-}
-
 fn owned_stream(
     reader: impl arrow_array::RecordBatchReader + Send + 'static,
 ) -> extendr_api::Result<Robj> {
@@ -55,6 +47,5 @@ fn owned_stream(
 extendr_module! {
     mod ckdata;
     fn core_versions;
-    fn arrow_probe_stream;
     use bridge;
 }

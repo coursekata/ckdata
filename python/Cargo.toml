@@ -11,5 +11,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ckdata = { path = "../core" }
+arrow-array = "60"
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
 pyo3-arrow = "0.21"

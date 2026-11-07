@@ -12,6 +12,8 @@ test_that("DBI pages one native result and zero-row fetches do not advance it", 
   expect_identical(as.character(first$big), "9007199254740993")
   expect_true(is.na(first$s_null))
   expect_identical(first$s_empty, "")
+  # Compare milliseconds exactly; relative equality on epoch values can hide lost precision.
+  expect_identical(round(as.numeric(first$ts) * 1000), 1792154096789)
   expect_false(DBI::dbHasCompleted(result))
   expect_identical(DBI::dbFetch(result, Inf)$id, 2L)
   expect_true(DBI::dbHasCompleted(result))
@@ -152,7 +154,8 @@ test_that("empty and populated native results have identical R column classes", 
 })
 
 test_that("foreign or serialized external pointers are rejected before dereferencing", {
-  for (object in list(NULL, new("externalptr"), arrow_probe_stream(), 0, "1")) {
+  stream <- native_result_fetch(native_probe_result(FALSE), -1)
+  for (object in list(NULL, new("externalptr"), stream, 0, "1")) {
     expect_error(native_result_info(object), "invalid ckdata native handle")
   }
   restored <- unserialize(serialize(native_probe_result(FALSE), NULL))
