@@ -4,9 +4,25 @@ The repository owner listed in [CODEOWNERS](CODEOWNERS) reviews dependency findi
 
 The shared quality workflow gates fixed HIGH/CRITICAL findings. The repository inventory retains UNKNOWN, LOW and MEDIUM findings, unfixed advisories, and development dependencies. OSV also reports Rust maintenance advisories that Trivy's vulnerability database may omit. No severity or fix filter belongs in the inventory. A clean Trivy result alone is insufficient to close a maintenance finding.
 
-Run `uv run --locked python -m scripts.audit_dependencies scan --output <report.json>` alongside the Trivy inventory. It reads only `Cargo.lock`, `r/src/rust/Cargo.lock`, and `uv.lock`; it sends public registry package names and versions to [OSV](https://google.github.io/osv.dev/post-v1-querybatch/). Its report preserves the full advisory records and exits unsuccessfully if the remote response is incomplete. Retain the JSON as a CI artifact and append the summary to the job summary. An unavailable advisory service is a failed inventory, not a clean result.
+CI uses OSV-Scanner directly on both Cargo locks, `uv.lock`, and the installed
+Renovate validator. Native JSON reports retain all packages, all vulnerabilities
+and Rust maintenance advisories. The npm dependency-tree output is retained
+alongside the scanner report, including installation-tree errors. No generated
+requirements file or custom registry API client is used.
 
-The Renovate validator also has an npm dependency graph even though this repository has no npm application. After the configured hook environment has been prepared, capture its existing graph with `npm ls --all --json` and pass the JSON through `--npm-tree`. The helper queries [npm's bulk advisory endpoint](https://docs.npmjs.com/cli/v11/commands/npm-audit/#bulk-advisory-endpoint) for every installed version. Keep `npm ls` tree errors in the report. Missing development dependencies in the published tool do not authorize an install or a cleanliness claim. This is an installed-version advisory inventory; npm's metavulnerability totals are not calculated. A run without `--npm-tree` explicitly reports that Node tooling was not audited.
+To audit the project locks locally with [OSV-Scanner](https://google.github.io/osv-scanner/installation/):
+
+```sh
+osv-scanner scan source --lockfile Cargo.lock --lockfile r/src/rust/Cargo.lock \
+  --lockfile uv.lock --all-packages --all-vulns --format json \
+  --output-file /tmp/ckdata-dependency-audit.json
+```
+
+OSV's exit status 1 means findings exist; other unsuccessful statuses fail CI.
+Reports remain available for review. Trivy scans each real lockfile directly with
+`--include-dev-deps`; the inventory includes every severity and unfixed finding,
+and a separate invocation gates fixed HIGH/CRITICAL findings. No test constructs
+a replacement dependency graph to verify the upstream scanners.
 
 A finding is closed when the dependency no longer resolves to an affected version, with a fresh audit attached. For a finding that cannot yet be fixed, record the exact advisory, package, parent constraint, owner and next review trigger here. Keep it visible in reports. Do not add an ignore rule, widen an upstream dependency constraint, edit a generated hook environment, or use an unreviewed fork to make a report pass. New vulnerability findings need an explicit risk decision by the repository owner; the entries below do not accept other advisories or future versions automatically.
 
@@ -38,9 +54,9 @@ done
 `generic-array 0.14.9` looks compatible by its own version range, but `crypto-common 0.1.7` requires `generic-array =0.14.7` exactly. A targeted update to 0.14.9 fails in both workspaces. Retain 0.14.7 until a parent release changes that requirement; do not hand-edit either lock. The 1.4.5 line is a separate breaking upgrade.
 
 The shared Python development environment is declared in root `pyproject.toml`
-and pinned in `uv.lock`. The default group covers pytest, boto3 and PyArrow;
-`bindings` adds the native build and frame-library tools. The Python package
-metadata remains under `python/`. No test or probe has a separate lockfile.
+and pinned in `uv.lock`. The default group covers pytest;
+`bindings` adds the native build, PyArrow and frame-library tools. The Python
+package metadata remains under `python/`. No test has a separate lockfile.
 The workspace's `tool.uv.exclude-newer` enforces a seven-day wait during ordinary
 updates and lock maintenance. Refresh with:
 
@@ -53,8 +69,8 @@ uv run --locked --group bindings --all-packages pytest python/tests
 Renovate's PEP621 manager supports the shared uv workspace lock and monthly
 lock maintenance. The former custom script-lock updater has been removed;
 [Renovate's standard support](https://docs.renovatebot.com/modules/manager/pep621/)
-owns Python dependency and lock refreshes. `python-dateutil 4.0.0` remains blocked
-by botocore's `python-dateutil>=2.1,<3.0.0` requirement. No forced override is used.
+owns Python dependency and lock refreshes. The retired AWS probe's boto3 and
+botocore dependencies are no longer part of the development environment.
 
 The dependency inventory covers every public registry version in both Cargo
 locks and `uv.lock`, including optional development groups and platform branches.

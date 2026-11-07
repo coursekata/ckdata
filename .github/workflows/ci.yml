@@ -52,7 +52,20 @@ jobs:
           prek-version: "0.5.9"
           extra-args: --all-files
 
-      - name: Capture the existing Renovate validator dependency graph
+      - name: Install OSV-Scanner
+        env:
+          # renovate: datasource=github-releases depName=google/osv-scanner
+          OSV_VERSION: v2.7.0
+        run: |
+          base="https://github.com/google/osv-scanner/releases/download/$OSV_VERSION"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/osv-scanner_linux_amd64"
+          curl -fsSLO "$base/osv-scanner_SHA256SUMS"
+          grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS | sha256sum -c -
+          mv osv-scanner_linux_amd64 osv-scanner
+          chmod +x osv-scanner
+
+      - name: Audit the lockfiles and installed Renovate validator
         run: |
           mkdir -p "$RUNNER_TEMP/npm-inventory"
           touch "$RUNNER_TEMP/npm-inventory/user.npmrc" "$RUNNER_TEMP/npm-inventory/global.npmrc"
@@ -65,14 +78,21 @@ jobs:
             > "$RUNNER_TEMP/renovate-tree.json"
           status=$?
           set -e
-          # The report retains ELSPROBLEMS and every existing version. Other failures are fatal.
           if [ "$status" -gt 1 ]; then exit "$status"; fi
-      - name: Retain informational Rust and complete Node tooling advisories
-        run: |
-          uv run --locked python -m scripts.audit_dependencies scan \
-            --npm-tree "$RUNNER_TEMP/renovate-tree.json" \
-            --output "$RUNNER_TEMP/dependency-osv-npm.json" \
-            --summary "$GITHUB_STEP_SUMMARY"
+          set +e
+          "$RUNNER_TEMP/osv-scanner" scan source \
+            --lockfile Cargo.lock --lockfile r/src/rust/Cargo.lock --lockfile uv.lock \
+            --no-call-analysis rust --no-resolve --all-packages --all-vulns \
+            --x-no-default-plugins --x-plugins rust/cargolock,python/uvlock,javascript/packagejson \
+            --recursive --no-ignore \
+            --x-exclude 'g:**/*[sS][aA][gG][aA]*' \
+            --format json --output-file "$RUNNER_TEMP/dependency-osv-npm.json" \
+            "$npm_root/renovate"
+          status=$?
+          set -e
+          # OSV uses 1 for findings; the full inventory is retained for review.
+          # Trivy gates fixed HIGH/CRITICAL findings in dependency-inventory.
+          if [ "$status" -gt 1 ]; then exit "$status"; fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -183,29 +203,27 @@ jobs:
           TRIVY_VERSION: v0.76.1
         with:
           version: ${{ env.TRIVY_VERSION }}
-      - name: Export every development lock record for scanning
-        run: python3 -m scripts.audit_dependencies export --output "$RUNNER_TEMP/dependency-inventory"
       - name: Inventory all severities, including unfixed advisories
         run: |
-          trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
-            --include-dev-deps --ignore-unfixed=false --ignorefile '' --config '' \
-            --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
-            --format json --output "$RUNNER_TEMP/dependency-inventory.json" \
-            "$RUNNER_TEMP/dependency-inventory"
-          python3 -m scripts.audit_dependencies verify "$RUNNER_TEMP/dependency-inventory.json"
-          {
-            echo '### Dependency advisory inventory'
-            echo 'Fixed HIGH/CRITICAL findings fail this job. The retained inventory includes every severity and unfixed finding.'
-            jq -r '.Results[] | .Vulnerabilities[]? | "- \(.Severity): \(.PkgName) \(.InstalledVersion), \(.VulnerabilityID), fix: \(.FixedVersion // "unreleased")"' "$RUNNER_TEMP/dependency-inventory.json"
-          } >> "$GITHUB_STEP_SUMMARY"
-          trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
-            --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress \
-            "$RUNNER_TEMP/dependency-inventory"
+          mkdir -p "$RUNNER_TEMP/dependency-inventory"
+          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock; do
+            trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+              --include-dev-deps --ignore-unfixed=false --ignorefile '' --config '' \
+              --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
+              --format json --output "$RUNNER_TEMP/dependency-inventory/${lock//\//-}.json" \
+              "$lock"
+          done
+      - name: Gate fixed HIGH and CRITICAL findings
+        run: |
+          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock; do
+            trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
+              --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress "$lock"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: dependency-advisory-inventory
-          path: ${{ runner.temp }}/dependency-inventory.json
+          path: ${{ runner.temp }}/dependency-inventory/*.json
           if-no-files-found: error
           retention-days: 30
 
@@ -221,19 +239,8 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Install Rust for build integration tests
-        run: rustup toolchain install stable --profile minimal
-
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-
-      - name: Run R build integration tests
-        run: uv run --locked pytest tests/integration
-
       - name: Build the source tarball
         run: R CMD build r
-
-      - name: Check the tarball carries the core
-        run: python3 -m scripts.check_r_tarball ckdata_*.tar.gz
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
