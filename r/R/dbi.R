@@ -54,15 +54,22 @@ single_string <- function(x, name, call = rlang::caller_env()) {
 #' @param role_arn Optional role to assume once; defaults to `CK_DATALAKE_ROLE_ARN`.
 #' @param freshness Optional default policy for [collect_saved()] on this
 #'   connection. NULL inherits application defaults at collection time.
+#' @param login Allow AWS SSO browser sign-in when credentials require it.
+#'   Defaults to option `ckdata.login`, or `interactive()` when unset.
+#'   FALSE fails immediately without starting login. TRUE permits one login
+#'   and one connection retry. Requires AWS CLI v2; existing credentials and
+#'   non-SSO authentication do not require it.
 #' @param ... Additional arguments; unsupported arguments raise an error.
 #' @export
 methods::setMethod("dbConnect", "CkDriver", function(
   drv,
   workgroup = getOption("ckdata.workgroup", Sys.getenv("CK_DATALAKE_WORKGROUP")),
   schema = ckdata_schema(), profile = NULL, region = NULL,
-  role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE), freshness = NULL, ...
+  role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE), freshness = NULL,
+  login = getOption("ckdata.login", rlang::is_interactive()), ...
 ) {
   rlang::check_dots_empty()
+  rlang::check_bool(login)
   check_freshness(freshness)
   workgroup <- single_string(workgroup, "workgroup")
   schema <- single_string(schema, "schema")
@@ -70,7 +77,7 @@ methods::setMethod("dbConnect", "CkDriver", function(
     if (!rlang::is_null(value)) single_string(value, name)
   })
   state <- rlang::new_environment(list(
-    handle = native_wait(native_connect(workgroup, schema, profile, region, role_arn)),
+    handle = connect_handle(workgroup, schema, profile, region, role_arn, login),
     open = TRUE, results = rlang::new_environment(), next_result = 0L, freshness = freshness
   ))
   methods::new("CkConnection", state = state)

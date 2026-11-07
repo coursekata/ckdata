@@ -8,6 +8,8 @@ pub enum Error {
     MissingRegion,
     #[error("AWS credentials could not be loaded; check the selected profile and AWS sign-in")]
     CredentialsUnavailable,
+    #[error("AWS SSO sign-in is required for profile {profile}", profile = .target.profile)]
+    SsoLoginRequired { target: crate::SsoLoginTarget },
     #[error("assuming the requested role failed ({code}){detail}", detail = message_suffix(.message))]
     AssumeRole {
         code: String,

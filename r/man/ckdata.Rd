@@ -64,6 +64,7 @@ ckdata()
   region = NULL,
   role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE),
   freshness = NULL,
+  login = getOption("ckdata.login", rlang::is_interactive()),
   ...
 )
 
@@ -168,6 +169,12 @@ ckdata()
 
 \item{freshness}{Optional default policy for \code{\link[=collect_saved]{collect_saved()}} on this
 connection. NULL inherits application defaults at collection time.}
+
+\item{login}{Allow AWS SSO browser sign-in when credentials require it.
+Defaults to option \code{ckdata.login}, or \code{interactive()} when unset.
+FALSE fails immediately without starting login. TRUE permits one login
+and one connection retry. Requires AWS CLI v2; existing credentials and
+non-SSO authentication do not require it.}
 
 \item{...}{Additional arguments; unsupported arguments raise an error.}
 

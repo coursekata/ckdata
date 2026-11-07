@@ -8,6 +8,8 @@ license = "MIT"
 
 [dependencies]
 aws-config = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process", "sso"] }
+aws-runtime = "1"
+aws-sdk-sso = { version = "1", default-features = false }
 aws-credential-types = "1"
 aws-sdk-athena = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }

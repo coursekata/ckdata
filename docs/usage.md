@@ -4,6 +4,9 @@ Complete [installation and configuration](installation.md) first. That guide
 also records which parts of the target R and Python interface are available
 in the current build.
 
+For a step-by-step acceptance session using invented data, follow the
+[researcher walkthrough](researcher-walkthrough.md).
+
 ## Queries in R
 
 `lake_tbl()` creates a lazy dbplyr table. Compose dplyr operations on it, then

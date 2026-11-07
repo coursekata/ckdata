@@ -70,10 +70,23 @@ For the current native binding and its tests, use the repository's
 
 ## AWS access
 
-Complete your organization's AWS sign-in before querying. ckdata uses standard
-AWS profiles, SSO credentials and region configuration; it does not start an
-interactive sign-in itself. For example, set these in your shell or application
-environment, using values for your intended environment:
+ckdata uses standard AWS profiles, SSO credentials and region configuration.
+In interactive R sessions, the first connection that needs SSO sign-in opens
+AWS's browser login through AWS CLI v2 and retries the connection once. No
+terminal sign-in command is needed. Install
+[AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+and make `aws` available to R for this flow. Valid existing credentials and
+hosted workload identities work without the CLI.
+
+Use `DBI::dbConnect(ckdata::ckdata(), login = FALSE)` to fail immediately when
+sign-in is needed, or set `options(ckdata.login = FALSE)` for managed helpers.
+The connection argument overrides the option. Scripts and jobs default to this
+fail-fast behavior; explicit `login = TRUE` permits browser sign-in. Other
+authentication failures and permission denials propagate without opening login.
+The Python query interface remains pending; this browser interaction is in R.
+
+Set the source profile and lake settings in your application environment, using
+values for your intended environment:
 
 ```sh
 export AWS_PROFILE=your-profile

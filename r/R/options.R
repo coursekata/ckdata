@@ -13,6 +13,10 @@
 #' - `ckdata.timeout`: query timeout in seconds, including result download and
 #'   empty-schema recovery. Defaults to 1800; a cancellation stop request can
 #'   require additional time as documented by the shared core.
+#' - `ckdata.login`: allow browser-based AWS SSO sign-in when a new connection
+#'   requires it. Defaults to [rlang::is_interactive()]. FALSE fails immediately;
+#'   an explicit `DBI::dbConnect(..., login = ...)` overrides this option.
+#'   Browser sign-in uses AWS CLI v2 and retries the connection once.
 #' - `ckdata.freshness`: default [collect_saved()] policy; see [daily_at()].
 #'   Explicit collection, table and connection policies take precedence, in
 #'   that order. The option overrides `CKDATA_FRESHNESS_AT` and

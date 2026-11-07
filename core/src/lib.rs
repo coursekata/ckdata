@@ -1,5 +1,6 @@
 //! Shared connection and Arrow infrastructure for ckdata's R and Python bindings.
 //! `Connection::connect` explicitly resolves AWS credentials and may assume a role.
+mod auth;
 mod connection;
 mod error;
 mod location;
@@ -8,6 +9,7 @@ mod query;
 mod result;
 mod settings;
 
+pub use auth::SsoLoginTarget;
 pub use connection::{CallerIdentity, Connection, SessionStatus};
 pub use error::Error;
 pub use metadata::{ColumnMetadata, TableMetadata, TablePage};

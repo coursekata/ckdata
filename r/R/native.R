@@ -11,7 +11,8 @@ native_value <- function(job) {
   error <- outcome$error
   rlang::abort(
     error$message,
-    class = "ckdata_native_error",
+    class = c(if (!rlang::is_null(error$sso_login)) "ckdata_sso_login_required", "ckdata_native_error"),
+    sso_login = error$sso_login,
     cancellation = error$cancellation,
     remote_may_be_running = error$remote_may_be_running
   )

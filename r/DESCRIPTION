@@ -16,7 +16,8 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 Config/rextendr/version: 0.5.0
-SystemRequirements: Cargo (Rust's package manager), rustc >= 1.94.1, xz
+SystemRequirements: Cargo (Rust's package manager), rustc >= 1.94.1, xz,
+    AWS CLI v2 (optional, for interactive AWS SSO sign-in)
 Depends: R (>= 4.2)
 Imports:
     arrow,

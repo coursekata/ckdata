@@ -10,8 +10,8 @@ Both packages share the same Rust query engine.
 ## Get started
 
 Follow the [installation and setup guide](docs/installation.md) for package
-availability, installation and AWS configuration. Use your organization's
-existing AWS sign-in and access permissions.
+availability, installation and AWS configuration. R can open your configured
+AWS SSO sign-in in the browser when the first connection needs it.
 
 ### R
 
@@ -51,6 +51,7 @@ across Athena's output files; sort after retrieval when local order matters.
 
 - [Installation and configuration](docs/installation.md)
 - [Usage, saved results and query behavior](docs/usage.md)
+- [Researcher walkthrough with synthetic data](docs/researcher-walkthrough.md)
 - [Development and repository structure](docs/development.md)
 - [Testing](tests/README.md)
 - [Releasing](docs/releasing.md)

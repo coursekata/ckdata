@@ -18,6 +18,7 @@ type NativeValue = std::result::Result<Completion, NativeFailure>;
 
 struct NativeFailure {
     message: String,
+    sso_login: Option<ckdata::SsoLoginTarget>,
     cancellation: Option<ckdata::CancellationStatus>,
     remote_may_be_running: bool,
 }
@@ -26,6 +27,7 @@ impl NativeFailure {
     fn message(message: impl ToString) -> Self {
         Self {
             message: message.to_string(),
+            sso_login: None,
             cancellation: None,
             remote_may_be_running: false,
         }
@@ -39,6 +41,10 @@ impl NativeFailure {
         });
         list!(
             message = self.message,
+            sso_login = self.sso_login.map_or_else(
+                || ().into_robj(),
+                |target| { list!(profile = target.profile, session = target.session).into_robj() }
+            ),
             cancellation = cancellation.map_or_else(|| ().into_robj(), |value| value.into_robj()),
             remote_may_be_running = self.remote_may_be_running
         )
@@ -48,6 +54,10 @@ impl NativeFailure {
 impl From<ckdata::Error> for NativeFailure {
     fn from(error: ckdata::Error) -> Self {
         Self {
+            sso_login: match &error {
+                ckdata::Error::SsoLoginRequired { target } => Some(target.clone()),
+                _ => None,
+            },
             message: error.to_string(),
             cancellation: error.cancellation_status(),
             remote_may_be_running: error.remote_query_may_be_running(),

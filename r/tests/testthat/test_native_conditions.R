@@ -15,6 +15,17 @@ test_that("native errors retain structured cancellation fields", {
   expect_match(rlang::cnd_message(cnd), "synthetic failure", fixed = TRUE)
 })
 
+test_that("native SSO metadata produces a typed condition for connection recovery", {
+  target <- list(profile = "synthetic", session = "fixture-session")
+  testthat::local_mocked_bindings(native_job_value = function(job) {
+    list(success = FALSE, error = list(message = "AWS SSO sign-in required", sso_login = target))
+  }, .package = "ckdata")
+  condition <- rlang::catch_cnd(native_value(NULL), classes = "error")
+  expect_s3_class(condition, "ckdata_sso_login_required")
+  expect_s3_class(condition, "ckdata_native_error")
+  expect_identical(condition$sso_login, target)
+})
+
 test_that("cancellation cleanup uses structured status rather than English messages", {
   testthat::local_mocked_bindings(
     native_cancel = function(job) NULL,

@@ -108,10 +108,12 @@ pub struct Connection {
 
 impl Connection {
     /// Use standard AWS profiles, region discovery, SSO and ambient credentials.
-    /// Call from a Tokio runtime. Unlike the offline literal probe, this method
-    /// can make authentication requests through the configured AWS providers.
+    /// Call from a Tokio runtime. This can make authentication requests through
+    /// the configured AWS providers; it never opens a browser or runs login.
     pub async fn connect(options: ConnectionOptions) -> Result<Self, Error> {
-        Self::with_loader(options, aws_config::defaults(BehaviorVersion::latest())).await
+        let config = load_config(&options, aws_config::defaults(BehaviorVersion::latest())).await?;
+        let login = crate::auth::login_target(options.profile.as_deref()).await;
+        Self::from_config_with_login(options, config, login).await
     }
 
     /// Reuse an already-resolved AWS SDK configuration, including its credential
@@ -136,6 +138,7 @@ impl Connection {
         Self::from_config(options, config).await
     }
 
+    #[cfg(test)]
     async fn with_loader(options: ConnectionOptions, loader: ConfigLoader) -> Result<Self, Error> {
         let config = load_config(&options, loader).await?;
         Self::from_config(options, config).await
@@ -143,7 +146,15 @@ impl Connection {
 
     pub(crate) async fn from_config(
         options: ConnectionOptions,
+        config: SdkConfig,
+    ) -> Result<Self, Error> {
+        Self::from_config_with_login(options, config, None).await
+    }
+
+    pub(crate) async fn from_config_with_login(
+        options: ConnectionOptions,
         mut config: SdkConfig,
+        login: Option<crate::SsoLoginTarget>,
     ) -> Result<Self, Error> {
         options.validate()?;
         if config
@@ -157,7 +168,7 @@ impl Connection {
             .ok_or(Error::CredentialsUnavailable)?
             .provide_credentials()
             .await
-            .map_err(|_| Error::CredentialsUnavailable)?;
+            .map_err(|error| crate::auth::credential_error(error, login))?;
 
         let lease = if let Some(role) = &options.role_arn {
             // Do not use an auto-refreshing AssumeRoleProvider here. Standard

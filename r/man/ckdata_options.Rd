@@ -19,6 +19,10 @@ visible in either setting.
 \item \code{ckdata.timeout}: query timeout in seconds, including result download and
 empty-schema recovery. Defaults to 1800; a cancellation stop request can
 require additional time as documented by the shared core.
+\item \code{ckdata.login}: allow browser-based AWS SSO sign-in when a new connection
+requires it. Defaults to \code{\link[rlang:is_interactive]{rlang::is_interactive()}}. FALSE fails immediately;
+an explicit \code{DBI::dbConnect(..., login = ...)} overrides this option.
+Browser sign-in uses AWS CLI v2 and retries the connection once.
 \item \code{ckdata.freshness}: default \code{\link[=collect_saved]{collect_saved()}} policy; see \code{\link[=daily_at]{daily_at()}}.
 Explicit collection, table and connection policies take precedence, in
 that order. The option overrides \code{CKDATA_FRESHNESS_AT} and

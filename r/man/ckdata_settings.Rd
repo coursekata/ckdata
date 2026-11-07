@@ -6,10 +6,20 @@
 \description{
 Credentials and region use standard AWS profiles, SSO and environment
 configuration. Set \code{AWS_PROFILE} and \code{AWS_REGION} as appropriate, or pass
-\code{profile} and \code{region} to \code{DBI::dbConnect()}. ckdata does not start an
-interactive AWS sign-in itself.
+\code{profile} and \code{region} to \code{DBI::dbConnect()}. When an interactive connection
+needs AWS SSO sign-in, ckdata runs AWS CLI v2 to open the browser, then
+retries the connection once. Profiles chained through \code{source_profile}
+use their SSO source profile. Existing credentials use the normal SDK path.
 }
 \details{
+Set \code{login = FALSE} in \code{DBI::dbConnect()} or option \code{ckdata.login = FALSE}
+to fail immediately without sign-in. The connection argument overrides the
+option; otherwise the default is \code{\link[rlang:is_interactive]{rlang::is_interactive()}}. Scripts and jobs
+therefore default to fail-fast behavior. Explicit TRUE permits sign-in.
+Cancellation, failed login and a failed retry propagate without a login loop.
+No browser login is started for permission denials, other authentication
+methods, or expiry of an existing fixed-role connection.
+
 \code{CK_DATALAKE_WORKGROUP} (or option \code{ckdata.workgroup}) selects the Athena
 workgroup. Its configuration supplies the result location and encryption;
 a separate staging-directory setting is unnecessary. \code{CK_DATALAKE_SCHEMA}

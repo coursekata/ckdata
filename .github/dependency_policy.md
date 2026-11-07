@@ -86,6 +86,14 @@ Regenerate documentation with roxygen2 8.1.1 when documentation next changes.
 
 ## Upgrades constrained by current parents
 
+`aws-config 1.13.0` exposes one private SSO token error through the deprecated
+`Error::cause()` method instead of `Error::source()`; see its
+[SSO token implementation](https://github.com/awslabs/aws-sdk-rust/blob/main/sdk/aws-config/src/sso/token.rs).
+The core follows that legacy link to the cache error's typed I/O source so a
+filesystem failure does not trigger browser login. Recheck this compatibility
+fallback on AWS SDK updates and remove it when the SDK exposes the modern source
+chain. Offline auth tests exercise the actual SDK wrapper with a filesystem fault.
+
 The following list covers every newer stable Rust line identified in the 2026-11-04 review after the coordinated Arrow 60.1.0 and pyo3-arrow 0.21.0 upgrade. These are pending updates, not audit exclusions. Each listed requirement comes from the resolved parent package's published manifest. Recheck it on a parent release, and rerun `cargo metadata --locked --format-version 1` for both workspaces when assessing an upgrade. Multiple major versions already coexist for some packages; updating one does not remove the older required copy.
 
 | Package | Locked → newer stable | Blocking parent requirement |
