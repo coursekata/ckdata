@@ -40,6 +40,28 @@ test_that("cached and fresh frames retain the current query's grouping", {
   expect_identical(collect_saved(query, dir = dir), plain)
 })
 
+test_that("fresh saved results and snapshots survive reconnecting to the same source", {
+  local_saved_policy()
+  fixture <- local_native_connection()
+  query <- dplyr::tbl(fixture$con, "types") |> dplyr::select(id, big)
+  directory <- withr::local_tempdir()
+  saved <- collect_saved(query, dir = directory)
+  snapshot <- collect_saved(query, snapshot = "baseline", dir = directory)
+  expect_length(fixture$calls$queries, 2L)
+  DBI::dbDisconnect(fixture$con)
+
+  con <- DBI::dbConnect(ckdata(), workgroup = "synthetic", schema = "fixture", role_arn = NULL)
+  withr::defer(DBI::dbDisconnect(con))
+  rebuilt <- dplyr::tbl(con, "types") |> dplyr::select(id, big)
+  testthat::local_mocked_bindings(
+    native_query = function(...) rlang::abort("a reusable saved result must not submit a query"),
+    .package = "ckdata"
+  )
+  expect_identical(collect_saved(rebuilt, dir = directory), saved)
+  expect_identical(collect_saved(rebuilt, snapshot = "baseline", dir = directory), snapshot)
+  expect_length(list.files(directory, pattern = "[.]parquet$"), 2L)
+})
+
 test_that("a failed publication returns fresh data and preserves the previous file", {
   local_saved_policy()
   fixture <- local_saved_tbl(data.frame(x = 1:3))
@@ -63,6 +85,7 @@ test_that("a failed publication returns fresh data and preserves the previous fi
 
 test_that("a cache hit is silent unless ckdata.verbose is TRUE", {
   local_saved_policy()
+  withr::local_options(ckdata.verbose = FALSE)
   q <- local_saved_tbl(data.frame(x = 1:3))$query
   dir <- withr::local_tempdir()
   collect_saved(q, dir = dir)

@@ -147,6 +147,22 @@ test_that("named-table discovery and SQL rendering do not fetch data", {
   expect_length(fixture$calls$queries, 1L)
 })
 
+test_that("catalog browsing and remote joins submit only the final collected query", {
+  fixture <- local_native_connection()
+  con <- fixture$con
+  expect_identical(DBI::dbListTables(con), "types")
+  expect_identical(DBI::dbListFields(con, "types"), c("id", "s_null", "s_empty", "big", "ts"))
+  values <- dplyr::tbl(con, "types") |> dplyr::select(id, big)
+  labels <- dplyr::tbl(con, "types") |> dplyr::select(id, s_empty)
+  query <- dplyr::left_join(values, labels, by = "id") |> dplyr::filter(id > 0)
+  expect_output(dplyr::show_query(query), "LEFT JOIN", fixed = TRUE)
+  expect_length(fixture$calls$queries, 0L)
+
+  collected <- dplyr::collect(query)
+  expect_identical(collected$id, c(1L, 2L))
+  expect_identical(fixture$calls$queries, as.character(dbplyr::remote_query(query)))
+})
+
 test_that("empty and populated native results have identical R column classes", {
   populated <- stream_frame(native_result_fetch(native_probe_result(FALSE), -1))
   empty <- stream_frame(native_result_fetch(native_probe_result(TRUE), -1))
