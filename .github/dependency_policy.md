@@ -4,8 +4,9 @@ The repository owner listed in [CODEOWNERS](CODEOWNERS) reviews dependency findi
 
 The shared quality workflow gates fixed HIGH/CRITICAL findings. The repository inventory retains UNKNOWN, LOW and MEDIUM findings, unfixed advisories, and development dependencies. OSV also reports Rust maintenance advisories that Trivy's vulnerability database may omit. No severity or fix filter belongs in the inventory. A clean Trivy result alone is insufficient to close a maintenance finding.
 
-CI uses OSV-Scanner directly on both Cargo locks, `uv.lock`, and the installed
-Renovate validator. Native JSON reports retain all packages, all vulnerabilities
+CI uses OSV-Scanner directly on both Cargo locks, `uv.lock`, the repository
+tools' `.github/package-lock.json`, and the installed Renovate validator.
+Native JSON reports retain all packages, all vulnerabilities
 and Rust maintenance advisories. The npm dependency-tree output is retained
 alongside the scanner report, including installation-tree errors. No generated
 requirements file or custom registry API client is used.
@@ -28,16 +29,27 @@ A finding is closed when the dependency no longer resolves to an affected versio
 
 ## Current findings requiring follow-up
 
-Reviewed 2026-11-02. All entries remain visible in the complete inventory.
+Reviewed 2026-11-07 for the Just/Lefthook migration. All entries remain visible
+in the complete inventory. Native `npm audit fix` removed compatible transitive
+findings without changing Renovate's pinned version. The remaining six affected
+package entries represent the three existing advisories below, including their
+dependency paths; there are no HIGH or CRITICAL npm findings in this inventory.
 
 | Finding | Scope and present constraint | Action and review trigger |
 |---|---|---|
 | [RUSTSEC-2024-0436](https://rustsec.org/advisories/RUSTSEC-2024-0436.html), informational/unmaintained | `paste 1.0.15`, required by the current `extendr-api 0.9.0`. No patched paste release. This advisory reports maintenance status and assigns no disclosed vulnerability or CVSS score. | Monitor extendr for a release that removes/replaces paste. Reevaluate the R binding dependency if a security advisory appears, the replacement is released, or maintenance stops blocking an upgrade. Review monthly; do not fork extendr solely to silence this informational finding. |
-| [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4), moderate | Renovate `44.206.2` pins affected `glob 13.0.6`; `glob 14.0.2` is the first fix. Existing transitive copies must be checked independently. | Update the hook when a tested Renovate release adopts the fix; audit the installed graph after every hook update. |
+| [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4), moderate | Renovate `44.206.2` pins affected `glob 13.0.6`; `glob 14.0.2` is the first fix. Existing transitive copies must be checked independently. | Update the npm development dependency when a tested Renovate release adopts the fix; audit the installed graph after every validator update. |
 | [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), moderate | Renovate `44.206.2` pins affected `minimatch 10.2.6`; `minimatch 11.0.1` is the first fix. | Same review trigger. Retain every installed affected version and dependency path in audit evidence. |
 | [GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4), low | Renovate `44.206.2` pins `deepmerge 4.3.1`, and no fixed release exists. | Monitor deepmerge and Renovate releases monthly and when the advisory changes. Reevaluate use of the validator if the affected merge operation is found to process attacker-controlled configuration. |
 
-These npm findings concern the developer validator. Published [Renovate 44.206.2 metadata](https://registry.npmjs.org/renovate/44.206.2) still pins all three affected direct versions. Updating the hook alone does not close them. No repository npm overrides or cache edits are maintained.
+These npm findings concern the developer validator. Published [Renovate 44.206.2 metadata](https://registry.npmjs.org/renovate/44.206.2) still pins all three affected direct versions. Moving it from a hook environment into npm does not close them. No repository npm overrides or cache edits are maintained.
+
+The validator also retains upstream deprecations: `bunyan -> mv -> rimraf
+2.4.5 -> glob 6.0.4 -> inflight 1.0.6`, `global-agent -> boolean 3.2.0`, and
+`google-auth-library -> gaxios -> node-fetch -> fetch-blob -> node-domexception
+1.0.0`. These are development-tool dependencies, not published ckdata runtime
+dependencies. Reevaluate them with the validator update; do not patch its
+installed dependency tree or hide the package-manager warnings.
 
 ## Updating locks and independent environments
 
@@ -54,7 +66,8 @@ done
 `generic-array 0.14.9` looks compatible by its own version range, but `crypto-common 0.1.7` requires `generic-array =0.14.7` exactly. A targeted update to 0.14.9 fails in both workspaces. Retain 0.14.7 until a parent release changes that requirement; do not hand-edit either lock. The 1.4.5 line is a separate breaking upgrade.
 
 The shared Python development environment is declared in root `pyproject.toml`
-and pinned in `uv.lock`. The default group covers pytest;
+and pinned in `uv.lock`. The default group covers pytest and the repository
+tools (Just, Lefthook, Ruff, Air, identify and the upstream file checkers).
 `bindings` adds the native build, PyArrow and frame-library tools. The Python
 package metadata remains under `python/`. No test has a separate lockfile.
 The workspace's `tool.uv.exclude-newer` enforces a seven-day wait during ordinary
@@ -65,6 +78,14 @@ uv lock --upgrade
 uv run --locked pytest
 uv run --locked --group bindings --all-packages pytest python/tests
 ```
+
+The Renovate validator is declared separately in `.github/package.json` and
+locked with npm, including its supported Node 24 runtime. Run
+`npm update --prefix .github`, `just _setup-repository-tools`,
+`npm audit --prefix .github`, and `just lint --target repo` when maintaining it.
+Only Node's runtime installer and RE2's native build scripts are enabled.
+Compatible npm fixes use `npm audit fix`; never use `--force` to accept a
+breaking change or the scanner's suggested downgrade of Renovate.
 
 Renovate's PEP621 manager supports the shared uv workspace lock and monthly
 lock maintenance. The former custom script-lock updater has been removed;

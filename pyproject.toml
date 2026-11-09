@@ -4,8 +4,17 @@ version = "0.0.0"
 requires-python = ">=3.11"
 
 [dependency-groups]
-dev = ["pytest>=9,<10"]
-bindings = ["maturin>=1.15,<2", "pyarrow>=26,<27", "polars", "pandas", "duckdb"]
+dev = [
+    { include-group = "test" },
+    "air-formatter>=0.12,<0.14",
+    "identify>=2.6,<3",
+    "lefthook>=2.2.2,<3",
+    "pre-commit-hooks>=6,<7",
+    "ruff>=0.17.3,<0.18",
+    "rust-just>=1.46,<2",
+]
+test = ["pytest>=9,<10"]
+bindings = [{ include-group = "test" }, "maturin>=1.15,<2", "pyarrow>=26,<27", "polars", "pandas", "duckdb"]
 
 [tool.uv]
 # This root configures development; python/ remains the distributable package.
@@ -21,3 +30,7 @@ members = ["python"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
+
+[tool.ruff]
+force-exclude = true
+extend-exclude = ["**/*[sS][aA][gG][aA]*/**", ".local", "target"]

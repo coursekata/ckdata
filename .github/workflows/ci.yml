@@ -44,13 +44,37 @@ jobs:
         run: |
           uv run --locked pytest tests/unit
 
-      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
-        env:
-          # quality scans the whole history for secrets.
-          SKIP: gitleaks-system
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          prek-version: "0.5.9"
-          extra-args: --all-files
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: .github/package-lock.json
+
+      - name: Install repository checkers
+        env:
+          # renovate: datasource=github-releases depName=rhysd/actionlint
+          ACTIONLINT_VERSION: v1.7.12
+        run: |
+          uv sync --locked
+          uv run --locked just _setup-repository-tools
+          go install github.com/rhysd/actionlint/cmd/actionlint@"$ACTIONLINT_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
+
+      - name: Check formatting and repository tooling
+        run: |
+          uv run --locked just fmt --check
+          uv run --locked just lint --target python
+          uv run --locked just lint --target repo
+
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+        with:
+          use-public-rspm: true
+      - name: Check R static analysis
+        run: |
+          Rscript -e 'install.packages(c("lintr", "jsonlite"), repos = "https://cloud.r-project.org")'
+          uv run --locked just lint --target r
 
       - name: Install OSV-Scanner
         env:
@@ -72,9 +96,8 @@ jobs:
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npm-inventory/user.npmrc"
           export NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/npm-inventory/global.npmrc"
           export NPM_CONFIG_CACHE="$RUNNER_TEMP/npm-inventory/cache"
-          npm_root=$(prek exec renovate-config-validator -- npm root --global)
           set +e
-          prek exec renovate-config-validator -- npm ls --all --json --prefix "$npm_root/renovate" \
+          npm ls --all --json --prefix .github \
             > "$RUNNER_TEMP/renovate-tree.json"
           status=$?
           set -e
@@ -82,12 +105,13 @@ jobs:
           set +e
           "$RUNNER_TEMP/osv-scanner" scan source \
             --lockfile Cargo.lock --lockfile r/src/rust/Cargo.lock --lockfile uv.lock \
+            --lockfile .github/package-lock.json \
             --no-call-analysis rust --no-resolve --all-packages --all-vulns \
             --x-no-default-plugins --x-plugins rust/cargolock,python/uvlock,javascript/packagejson \
             --recursive --no-ignore \
             --x-exclude 'g:**/*[sS][aA][gG][aA]*' \
             --format json --output-file "$RUNNER_TEMP/dependency-osv-npm.json" \
-            "$npm_root/renovate"
+            .github/node_modules
           status=$?
           set -e
           # OSV uses 1 for findings; the full inventory is retained for review.
@@ -127,23 +151,18 @@ jobs:
             target
           key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml') }}
 
-      # Lints the Python binding too.
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      # The binding has no Rust tests, and its test binary would need libpython to link.
-      - run: cargo test --workspace --all-targets --locked --exclude ckdata-py
-
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.11"
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+        with:
+          use-public-rspm: true
+      - name: Lint both Rust workspaces
+        run: uv run --locked just lint --target rust
+      - name: Test the shared Rust core
+        run: uv run --locked just test --target rust
       - name: Test the compiled Python binding
-        run: uv run --locked --group bindings --all-packages pytest python/tests
-
-      - name: Verify locked Cargo license notices
-        run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
-          python3 scripts/check_licenses.py
+        run: uv run --locked just test --target python
 
   rust-minimum:
     timeout-minutes: 30
@@ -206,7 +225,7 @@ jobs:
       - name: Inventory all severities, including unfixed advisories
         run: |
           mkdir -p "$RUNNER_TEMP/dependency-inventory"
-          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock; do
+          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock .github/package-lock.json; do
             trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
               --include-dev-deps --ignore-unfixed=false --ignorefile '' --config '' \
               --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
@@ -215,7 +234,7 @@ jobs:
           done
       - name: Gate fixed HIGH and CRITICAL findings
         run: |
-          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock; do
+          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock .github/package-lock.json; do
             trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
               --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress "$lock"
           done

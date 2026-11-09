@@ -1,0 +1,6 @@
+linters: list(
+    assignment_linter(),
+    equals_na_linter(),
+    T_and_F_symbol_linter(),
+    vector_logic_linter()
+  )

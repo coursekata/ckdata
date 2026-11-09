@@ -4,3 +4,5 @@
 ^src/Makevars$
 ^src/Makevars\.win$
 ^data-raw$
+(^|/)[^/]*saga[^/]*(/|$)
+^\.lintr$

@@ -7,7 +7,7 @@
   "enabledManagers": [
     "cargo",
     "pep621",
-    "pre-commit",
+    "npm",
     "custom.regex"
   ],
   "packageRules": [
@@ -39,10 +39,10 @@
         "/^\\.github/workflows/ci\\.yml$/"
       ],
       "matchStrings": [
-        "prek-version: \"(?<currentValue>[0-9.]+)\""
+        "ACTIONLINT_VERSION: (?<currentValue>v[0-9.]+)"
       ],
       "datasourceTemplate": "github-releases",
-      "depNameTemplate": "j178/prek"
+      "depNameTemplate": "rhysd/actionlint"
     }
   ],
   "lockFileMaintenance": {
