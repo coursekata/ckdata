@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use arrow_array::types::{
     TimestampMicrosecondType, TimestampMillisecondType, TimestampNanosecondType,
@@ -17,8 +17,8 @@ use aws_credential_types::{Credentials, provider::SharedCredentialsProvider};
 use aws_sdk_athena::types::{EncryptionOption, WorkGroupConfiguration};
 use aws_types::{SdkConfig, region::Region};
 use ckdata::{
-    CallerIdentity, Connection, ConnectionOptions, Error, QueryCancellation, QueryInterruption,
-    QueryOptions, QueryResult, SessionStatus,
+    CallerIdentity, Connection, ConnectionOptions, Error, QueryCancellation, QueryOptions,
+    QueryResult,
 };
 use clap::Parser;
 use serde::Deserialize;
@@ -76,7 +76,7 @@ struct Args {
     workgroup: Option<String>,
     #[arg(long, required_unless_present = "deployment")]
     schema: Option<String>,
-    /// An optional additional role, assumed once by the Rust connection.
+    /// An optional additional role, renewed by the AWS SDK.
     #[arg(long)]
     role_arn: Option<String>,
     #[arg(long, required_unless_present = "deployment")]
@@ -87,9 +87,6 @@ struct Args {
     /// Optional catalog-only metadata check; never selects rows from this table.
     #[arg(long)]
     table: Option<String>,
-    /// Wait for actual role expiry, then verify a new query fails before submission.
-    #[arg(long)]
-    wait_for_expiry: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,10 +312,7 @@ async fn run_query(connection: &Connection, sql: &str) -> Result<QueryResult, St
 }
 
 fn check_types(result: &QueryResult) -> Result<(), String> {
-    require(
-        result.row_count() == 2 && result.warnings().is_empty(),
-        "literal count or session warning changed",
-    )?;
+    require(result.row_count() == 2, "literal result count changed")?;
     let schema = result.schema();
     check_probe_batches(&schema, result.batches())
 }
@@ -481,11 +475,7 @@ fn check_empty_result(
         &result.schema() == expected,
         "empty result's full Parquet schema differs",
     )?;
-    let (reader, warnings) = result.into_reader_with_warnings();
-    require(
-        warnings.is_empty(),
-        "unexpected session warning during acceptance",
-    )?;
+    let reader = result.into_reader();
     require(&reader.schema() == expected, "empty reader lost its schema")?;
     for batch in reader {
         require(
@@ -616,45 +606,6 @@ async fn check_seat(
     Ok(connection)
 }
 
-async fn check_role_expiry(connections: Vec<Connection>) -> Result<(), String> {
-    let remaining = connections
-        .iter()
-        .map(|connection| match connection.session_status() {
-            Ok(
-                SessionStatus::Assumed { remaining, .. }
-                | SessionStatus::Expiring { remaining, .. },
-            ) => Ok(remaining),
-            _ => Err("connection has no active explicit-role lease"),
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .max()
-        .unwrap_or_default();
-    println!("INFO waiting for actual one-hour role expiry; no renewal or queries during the wait");
-    tokio::time::sleep(remaining + Duration::from_secs(1)).await;
-    for connection in connections {
-        require(
-            matches!(
-                connection
-                    .query(
-                        "SELECT 1",
-                        &QueryOptions::default(),
-                        &QueryCancellation::new()
-                    )
-                    .await,
-                Err(Error::QueryInterrupted {
-                    query_id: None,
-                    reason: QueryInterruption::SessionExpired,
-                    ..
-                })
-            ),
-            "expired role did not reject a new query before submission",
-        )?;
-    }
-    println!("PASS actual assumed-role expiry rejects new queries");
-    Ok(())
-}
-
 async fn load_sdk_config(profile: Option<String>, region: Option<String>) -> SdkConfig {
     let mut loader = aws_config::defaults(BehaviorVersion::latest());
     if let Some(profile) = profile {
@@ -690,12 +641,6 @@ where
         args.run_live,
         "no AWS clients created; add --run-live only when ready for live acceptance",
     )?;
-    if args.wait_for_expiry {
-        require(
-            deployment.is_some() || args.role_arn.is_some(),
-            "expiry check requires an explicit additional role",
-        )?;
-    }
     if deployment.is_none() {
         require(
             account_valid(args.expected_account.as_deref().unwrap_or_default()),
@@ -707,8 +652,8 @@ where
         .map(|deployment| deployment.region.clone())
         .or(args.region);
     let base = load(args.profile, region).await;
-    let connections = if let Some(deployment) = deployment {
-        check_deployment(&base, &deployment).await?
+    if let Some(deployment) = deployment {
+        check_deployment(&base, &deployment).await?;
     } else {
         let mut options = ConnectionOptions::new(
             args.workgroup.ok_or("missing workgroup")?,
@@ -734,10 +679,6 @@ where
             "final-acceptance identity differs; no data query submitted",
         )?;
         checks(&connection, args.table.as_deref(), false).await?;
-        vec![connection]
-    };
-    if args.wait_for_expiry {
-        check_role_expiry(connections).await?;
     }
     Ok(())
 }
@@ -1053,6 +994,7 @@ mod tests {
                 [
                     ("text/xml", operator),
                     ("text/xml", assumed),
+                    ("text/xml", assumed),
                     ("text/xml", reader),
                     ("application/x-amz-json-1.1", group.as_str()),
                     // Keep the first forbidden attempt visible in the trace.
@@ -1097,9 +1039,9 @@ mod tests {
             std::fs::remove_file(path).unwrap();
             assert!(error.contains(reason), "{error}");
             let requests: Vec<_> = http.actual_requests().collect();
-            assert_eq!(requests.len(), 4);
+            assert_eq!(requests.len(), 5);
             assert_eq!(
-                requests[3].headers().get("x-amz-target"),
+                requests[4].headers().get("x-amz-target"),
                 Some("AmazonAthena.GetWorkGroup")
             );
         }

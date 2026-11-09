@@ -1,4 +1,4 @@
-#' Query the CourseKata data lake
+#' Query Amazon Athena
 #'
 #' @keywords internal
 #' @import DBI methods

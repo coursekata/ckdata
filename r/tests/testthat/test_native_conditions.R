@@ -3,7 +3,11 @@ test_that("native errors retain structured cancellation fields", {
     native_job_value = function(job) {
       list(
         success = FALSE,
-        error = list(message = "synthetic failure", cancellation = "unconfirmed", remote_may_be_running = TRUE)
+        error = list(
+          message = "synthetic failure",
+          cancellation = "unconfirmed",
+          remote_may_be_running = TRUE
+        )
       )
     },
     .package = "ckdata"
@@ -17,9 +21,15 @@ test_that("native errors retain structured cancellation fields", {
 
 test_that("native SSO metadata produces a typed condition for connection recovery", {
   target <- list(profile = "synthetic", session = "fixture-session")
-  testthat::local_mocked_bindings(native_job_value = function(job) {
-    list(success = FALSE, error = list(message = "AWS SSO sign-in required", sso_login = target))
-  }, .package = "ckdata")
+  testthat::local_mocked_bindings(
+    native_job_value = function(job) {
+      list(
+        success = FALSE,
+        error = list(message = "AWS SSO sign-in required", sso_login = target)
+      )
+    },
+    .package = "ckdata"
+  )
   condition <- rlang::catch_cnd(native_value(NULL), classes = "error")
   expect_s3_class(condition, "ckdata_sso_login_required")
   expect_s3_class(condition, "ckdata_native_error")
@@ -36,19 +46,31 @@ test_that("cancellation cleanup uses structured status rather than English messa
     native_job_value = function(job) {
       list(
         success = FALSE,
-        error = list(message = "query may be active", cancellation = "unconfirmed", remote_may_be_running = TRUE)
+        error = list(
+          message = "query may be active",
+          cancellation = "unconfirmed",
+          remote_may_be_running = TRUE
+        )
       )
     },
     .package = "ckdata"
   )
-  expect_warning(drain_native_job(NULL), "query may be active", class = "ckdata_cancellation_warning")
+  expect_warning(
+    drain_native_job(NULL),
+    "query may be active",
+    class = "ckdata_cancellation_warning"
+  )
   withr::local_options(warn = 2)
   expect_message(drain_native_job(NULL), "query may be active")
   testthat::local_mocked_bindings(
     native_job_value = function(job) {
       list(
         success = FALSE,
-        error = list(message = "unconfirmed and outcome unknown are only text", cancellation = NULL, remote_may_be_running = FALSE)
+        error = list(
+          message = "unconfirmed and outcome unknown are only text",
+          cancellation = NULL,
+          remote_may_be_running = FALSE
+        )
       )
     },
     .package = "ckdata"
@@ -60,19 +82,8 @@ test_that("native handle errors become rlang conditions with their cause", {
   cnd <- rlang::catch_cnd(native_value(NULL), classes = "error")
   expect_s3_class(cnd, "ckdata_native_error")
   expect_s3_class(cnd$parent, "error")
-  expect_match(rlang::cnd_message(cnd), "invalid ckdata native handle")
-})
-
-test_that("preflight expiry warnings use the session warning class", {
-  fixture <- local_native_connection()
-  original <- native_connection_info
-  testthat::local_mocked_bindings(
-    native_connection_info = function(handle) {
-      info <- original(handle)
-      info$expiring <- TRUE
-      info
-    },
-    .package = "ckdata"
+  expect_identical(
+    stringr::str_count(rlang::cnd_message(cnd), "invalid ckdata native handle"),
+    1L
   )
-  expect_warning(check_connection(fixture$con), "will not renew", class = "ckdata_session_warning")
 })

@@ -70,9 +70,14 @@ For the current native binding and its tests, use the repository's
 
 ## AWS access
 
+CourseKata researcher access and environment provisioning are documented
+internally. This repository records package installation and configuration;
+it does not provision an example environment. The package's runtime settings
+remain generic and accept the previous R package's environment names.
+
 ckdata uses standard AWS profiles, SSO credentials and region configuration.
 In interactive R sessions, the first connection that needs SSO sign-in opens
-AWS's browser login through AWS CLI v2 and retries the connection once. No
+AWS's browser login through AWS CLI v2 and resumes the same operation. No
 terminal sign-in command is needed. Install
 [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 and make `aws` available to R for this flow. Valid existing credentials and
@@ -85,19 +90,37 @@ fail-fast behavior; explicit `login = TRUE` permits browser sign-in. Other
 authentication failures and permission denials propagate without opening login.
 The Python query interface remains pending; this browser interaction is in R.
 
-Set the source profile and lake settings in your application environment, using
+Set the source profile and connection settings in your application environment, using
 values for your intended environment:
 
 ```sh
 export AWS_PROFILE=your-profile
 export AWS_REGION=your-region
-export CK_DATALAKE_WORKGROUP=your-workgroup
-export CK_DATALAKE_SCHEMA=your-database
+export CKDATA_WORKGROUP=your-workgroup
+export CKDATA_SCHEMA=your-database
 ```
 
-The workgroup supplies the result location and encryption settings. There is
-no separate staging-directory setting. `CK_DATALAKE_ROLE_ARN` optionally names
-an additional role to assume once; see [session lifetime](usage.md#sessions-and-parallel-work).
+The workgroup supplies the result location and encryption settings by default.
+`CKDATA_OUTPUT_LOCATION` is an optional S3 result prefix when the workgroup permits
+client settings. `CKDATA_ROLE_ARN` optionally requires an additional role, using
+AWS-managed renewal; see [session lifetime](usage.md#sessions-and-parallel-work).
+
+The old R package's connection variables remain supported:
+
+| Canonical name | Legacy alias |
+|---|---|
+| `CKDATA_PROFILE` | `CK_DATALAKE_INTERNAL_PROFILE` |
+| `CKDATA_REGION` | `CK_DATALAKE_REGION` |
+| `CKDATA_WORKGROUP` | `CK_DATALAKE_WORKGROUP` |
+| `CKDATA_SCHEMA` | `CK_DATALAKE_SCHEMA` |
+| `CKDATA_ROLE_ARN` | `CK_DATALAKE_ROLE_ARN` |
+| `CKDATA_OUTPUT_LOCATION` | `CK_DATALAKE_S3_STAGING_DIR` |
+
+A present canonical variable wins, including an empty value. For example,
+`CKDATA_ROLE_ARN=` masks an inherited legacy role. When the canonical variable
+is absent, its legacy alias is used. No AWS environment variable is rewritten.
+`CKDATA_PROFILE` and `CKDATA_REGION` are optional package-specific overrides;
+without them, standard AWS discovery applies.
 
 In R, an explicit DBI connection can supply settings directly:
 
@@ -113,7 +136,14 @@ con <- DBI::dbConnect(
 ```
 
 Managed R helpers also accept `ckdata.workgroup` and `ckdata.schema` options.
-For compatibility they accept `CK_DATALAKE_INTERNAL_PROFILE` and
-`CK_DATALAKE_REGION`; explicit DBI connections use the standard AWS chain
-unless corresponding arguments are supplied. See `?ckdata::ckdata_settings`
-and `?ckdata::ckdata_options` for the R configuration reference.
+The schema falls back to `default`; set it explicitly for your source. No
+organization-specific database is selected automatically.
+All six aliases apply to both managed helpers and explicit DBI connections.
+Connection arguments override environment configuration; explicit NULL bypasses
+optional profile, region, role and result-location settings. Existing R options
+for workgroup and schema take precedence over their environment variables.
+
+Users who previously relied on the old package's implicit CourseKata marts
+database must set `CKDATA_SCHEMA` or `CK_DATALAKE_SCHEMA` explicitly. Compatibility
+preserves named settings; it does not restore an organization-specific default.
+See `?ckdata::ckdata_settings` and `?ckdata::ckdata_options` for the reference.

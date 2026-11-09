@@ -22,6 +22,7 @@ fn target() -> SsoLoginTarget {
     SsoLoginTarget {
         profile: "workforce".to_owned(),
         session: Some("synthetic".to_owned()),
+        config: None,
     }
 }
 
@@ -124,7 +125,8 @@ async fn sdk_profiles_resolve_the_sso_source_of_a_role_chain() {
         profile_login_target(&profiles(legacy, "default").await),
         Some(SsoLoginTarget {
             profile: "default".into(),
-            session: None
+            session: None,
+            config: None,
         })
     );
 }
@@ -163,28 +165,40 @@ async fn alternate_authentication_incomplete_profiles_and_cycles_do_not_offer_ss
 
 #[tokio::test]
 async fn missing_sdk_sso_cache_is_a_typed_login_error_without_http() {
-    use aws_smithy_http_client::test_util::NeverClient;
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .env(Env::from_slice(&[
-            ("AWS_CONFIG_FILE", "/synthetic/config"),
-            ("AWS_SHARED_CREDENTIALS_FILE", "/synthetic/absent"),
-            ("AWS_PROFILE", "reader"),
-            ("HOME", "/synthetic/home"),
-            ("AWS_EC2_METADATA_DISABLED", "true"),
-        ]))
-        .fs(Fs::from_slice(&[("/synthetic/config", CONFIG)]))
-        .region(aws_types::region::Region::new("us-west-2"))
-        .http_client(NeverClient::new())
-        .load()
-        .await;
-    let error = crate::Connection::from_config_with_login(
-        crate::ConnectionOptions::new("synthetic", "fixture"),
-        config,
-        Some(target()),
-    )
-    .await
-    .unwrap_err();
+    let config = sdk_config("reader", Fs::from_slice(&[("/synthetic/config", CONFIG)])).await;
+    let error = config
+        .credentials_provider()
+        .unwrap()
+        .provide_credentials()
+        .await
+        .unwrap_err();
+    let error = credential_error(error, Some(target()));
     assert!(matches!(error, Error::SsoLoginRequired { target: actual } if actual == target()));
+}
+
+#[tokio::test]
+async fn expired_sdk_sso_cache_requests_login_through_multiple_role_hops() {
+    let config = format!(
+        "[profile outer]\nrole_arn = arn:aws:iam::000000000000:role/outer\nsource_profile = reader\n{CONFIG}"
+    );
+    // SHA-1 of the invented session name `synthetic`, as used by AWS's cache.
+    let cache = "/synthetic/home/.aws/sso/cache/385fcd6760f6432fcdc51c5f995ea61a31d5bbab.json";
+    let expired = r#"{"accessToken":"invented-expired-token","expiresAt":"2000-01-01T00:00:00Z"}"#;
+    let sdk = sdk_config(
+        "outer",
+        Fs::from_slice(&[("/synthetic/config", config.as_str()), (cache, expired)]),
+    )
+    .await;
+    let error = sdk
+        .credentials_provider()
+        .unwrap()
+        .provide_credentials()
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        credential_error(error, profile_login_target(&profiles(&config, "outer").await)),
+        Error::SsoLoginRequired { target: actual } if actual == target()
+    ));
 }
 
 #[test]
@@ -212,6 +226,18 @@ fn token_failures_require_sso_but_transport_and_configuration_errors_do_not() {
         credential_error(no_profile, None),
         Error::CredentialsUnavailable
     ));
+    for token in [
+        TokenError::invalid_configuration("synthetic invalid configuration"),
+        TokenError::provider_timed_out(std::time::Duration::from_secs(1)),
+        TokenError::not_loaded("no configured provider"),
+        TokenError::unhandled("synthetic malformed response"),
+        TokenError::provider_error(std::io::Error::from(std::io::ErrorKind::ConnectionRefused)),
+    ] {
+        assert!(matches!(
+            credential_error(CredentialsError::provider_error(token), Some(target())),
+            Error::CredentialsUnavailable
+        ));
+    }
 }
 
 #[test]

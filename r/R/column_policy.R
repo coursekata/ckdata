@@ -4,11 +4,13 @@
 # Report, and in publish mode remove, the flagged columns query `x` uses or returns (see
 # ?ckdata_options), given the registered lake `tables`. Reads only the query's SQL and columns, so
 # nothing runs against the lake.
-apply_column_policy <- function(x,
-                                tables = lake_state$tables,
-                                mode = ckdata_mode(),
-                                allow = ckdata_allow(),
-                                changes = column_changes) {
+apply_column_policy <- function(
+  x,
+  tables = lake_state$tables,
+  mode = ckdata_mode(),
+  allow = ckdata_allow(),
+  changes = column_changes
+) {
   if (mode == "explore") {
     return(x)
   }
@@ -16,8 +18,17 @@ apply_column_policy <- function(x,
   if (nrow(hits) == 0) {
     return(x)
   }
-  removed <- if (mode == "publish") unique(hits$column[hits$returned]) else character()
-  report_flagged(hits, mode, removed, nothing_left = all(colnames(x) %in% removed))
+  removed <- if (mode == "publish") {
+    unique(hits$column[hits$returned])
+  } else {
+    character()
+  }
+  report_flagged(
+    hits,
+    mode,
+    removed,
+    nothing_left = all(colnames(x) %in% removed)
+  )
   if (length(removed) == 0) x else dplyr::select(x, -dplyr::all_of(removed))
 }
 
@@ -33,7 +44,10 @@ flagged_in_query <- function(x, tables, changes, allow) {
         dbplyr::escape(dbplyr::ident(.data$column), con = con, collapse = NULL)
       ),
       mentions = stringr::str_count(sql, stringr::fixed(.data$quoted)),
-      definitions = stringr::str_count(sql, stringr::fixed(stringr::str_c("AS ", .data$quoted))),
+      definitions = stringr::str_count(
+        sql,
+        stringr::fixed(stringr::str_c("AS ", .data$quoted))
+      ),
       used = .data$mentions > .data$definitions,
       returned = .data$column %in% colnames(x) & .data$definitions == 0
     ) |>
@@ -60,10 +74,16 @@ internal_columns <- function(read) {
   internal <- stringr::str_detect(read$table, "^(stg|int)_")
   read[internal, ] |>
     dplyr::filter(!.data$column %in% read$column[!internal]) |>
-    dplyr::mutate(note = stringr::str_c(
-      dplyr::if_else(stringr::str_starts(.data$table, "stg_"), "staging", "intermediate"),
-      " table, may change without notice"
-    ))
+    dplyr::mutate(
+      note = stringr::str_c(
+        dplyr::if_else(
+          stringr::str_starts(.data$table, "stg_"),
+          "staging",
+          "intermediate"
+        ),
+        " table, may change without notice"
+      )
+    )
 }
 
 is_allowed <- function(table, column, allow) {
@@ -83,7 +103,10 @@ report_flagged <- function(hits, mode, removed, nothing_left) {
       "ckdata ({mode} mode): {dplyr::n_distinct(hits$column)} column{?s} in this query ",
       "{?is/are} deprecated or may change."
     ),
-    rlang::set_names(stringr::str_glue_data(hits, "`{column}` ({table}): {note}."), "*"),
+    rlang::set_names(
+      stringr::str_glue_data(hits, "`{column}` ({table}): {note}."),
+      "*"
+    ),
     x = outcome,
     i = cli::format_inline(
       "Keep a column with ",

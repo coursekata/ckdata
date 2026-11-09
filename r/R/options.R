@@ -8,15 +8,16 @@
 #'   for example `list(mart_responses = c("lrn_type", "item_id"))`. An allowed column is never
 #'   reported or removed, in any mode.
 #' - `ckdata.verbose`: `TRUE` reports when [collect_saved()] reuses a saved
-#'   result. Defaults to `FALSE`. Core failure and role-expiry warnings remain
+#'   result. Defaults to `FALSE`. Core failures remain
 #'   visible in either setting.
 #' - `ckdata.timeout`: query timeout in seconds, including result download and
 #'   empty-schema recovery. Defaults to 1800; a cancellation stop request can
 #'   require additional time as documented by the shared core.
-#' - `ckdata.login`: allow browser-based AWS SSO sign-in when a new connection
-#'   requires it. Defaults to [rlang::is_interactive()]. FALSE fails immediately;
+#' - `ckdata.login`: allow browser-based AWS SSO sign-in on a connection and
+#'   its later operations. Captured when the connection is opened. Defaults to [rlang::is_interactive()]. FALSE fails immediately;
 #'   an explicit `DBI::dbConnect(..., login = ...)` overrides this option.
-#'   Browser sign-in uses AWS CLI v2 and retries the connection once.
+#'   Browser sign-in uses AWS CLI v2 and retries credential acquisition once
+#'   per top-level operation, preserving the existing connection and query.
 #' - `ckdata.freshness`: default [collect_saved()] policy; see [daily_at()].
 #'   Explicit collection, table and connection policies take precedence, in
 #'   that order. The option overrides `CKDATA_FRESHNESS_AT` and
@@ -66,14 +67,15 @@ ckdata_verbose <- function() {
 #' The database lake_tbl() reads from by default
 #'
 #' [lake_tbl()] opens a table from this database when the call names none. It is the
-#' `ckdata.schema` option when that is set, then the `CK_DATALAKE_SCHEMA` environment variable, and
-#' otherwise the marts database, `"ck_datalake_prd_marts_app"`. An empty variable counts as unset.
+#' `ckdata.schema` option when that is set, then `CKDATA_SCHEMA` (or its legacy alias `CK_DATALAKE_SCHEMA`), and
+#' otherwise `"default"`. An empty variable counts as unset. No organization-specific
+#' database or AWS account is selected by the package.
 #' The option and the variable are read on every call, so a change applies to the next [lake_tbl()]
 #' call.
 #'
 #' Set the option in a script or `.Rprofile`. Set the variable where the environment rather than the
 #' script decides: an environment that may read only the `research` views, such as a research
-#' container, sets `CK_DATALAKE_SCHEMA=research`, and its scripts name no database.
+#' container, sets `CKDATA_SCHEMA=research`, and its scripts name no database.
 #'
 #' @return The database's name.
 #' @seealso [ckdata_options], [ckdata_settings]
@@ -86,8 +88,8 @@ ckdata_verbose <- function() {
 #' options(old)
 ckdata_schema <- function() {
   getOption("ckdata.schema") %||%
-    lake_env("CK_DATALAKE_SCHEMA", required = FALSE) %||%
-    "ck_datalake_prd_marts_app"
+    config_env("CKDATA_SCHEMA") %||%
+    "default"
 }
 
 ckdata_mode <- function() {
@@ -101,7 +103,8 @@ ckdata_mode <- function() {
 
 ckdata_allow <- function() {
   allow <- getOption("ckdata.allow", list())
-  valid <- rlang::is_list(allow) && rlang::is_named2(allow) &&
+  valid <- rlang::is_list(allow) &&
+    rlang::is_named2(allow) &&
     purrr::every(allow, rlang::is_character)
   if (!valid) {
     cli::cli_abort(

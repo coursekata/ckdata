@@ -1,5 +1,8 @@
 test_that("the shipped column table holds, as text, every field the check reads", {
-  expect_named(column_changes, c("table", "column", "new_table", "new_column", "removed_on"))
+  expect_named(
+    column_changes,
+    c("table", "column", "new_table", "new_column", "removed_on")
+  )
   expect_true(all(vapply(column_changes, rlang::is_character, logical(1))))
 })
 
@@ -16,10 +19,13 @@ test_that("each kind of replacement gets its own note", {
     removed_on = "2026-12-01"
   )
 
-  expect_equal(notes, c(
-    "deprecated, removed on 2026-12-01; use `question_type`",
-    "deprecated, removed on 2026-12-01; use `variation_index` on mart_enrollments",
-    "deprecated, removed on 2026-12-01; see mart_questions",
-    "deprecated, removed on 2026-12-01, with no replacement"
-  ))
+  expect_equal(
+    notes,
+    c(
+      "deprecated, removed on 2026-12-01; use `question_type`",
+      "deprecated, removed on 2026-12-01; use `variation_index` on mart_enrollments",
+      "deprecated, removed on 2026-12-01; see mart_questions",
+      "deprecated, removed on 2026-12-01, with no replacement"
+    )
+  )
 })

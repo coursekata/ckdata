@@ -1,13 +1,13 @@
 # ckdata
 
-Query the CourseKata data lake from R or Python. ckdata runs read-only Athena
+Query Amazon Athena from R or Python. ckdata runs read-only SQL
 queries and brings Parquet results into your analysis through Apache Arrow.
 
 In R, use dplyr and dbplyr to build lazy queries, or use SQL through DBI. In
 Python, use SQL and consume results with PyArrow, pandas, Polars or DuckDB.
 Both packages share the same Rust query engine.
 
-## Get started
+## Installation and configuration
 
 Follow the [installation and setup guide](docs/installation.md) for package
 availability, installation and AWS configuration. R can open your configured
@@ -15,13 +15,13 @@ AWS SSO sign-in in the browser when the first connection needs it.
 
 ### R
 
+With your CourseKata source configured, a summary query looks like:
+
 ```r
 library(ckdata)
 library(dplyr)
 
-query <- lake_tbl("my_table") |>
-  filter(category == "example") |>
-  summarise(n = n())
+query <- lake_tbl("mart_classes") |> count()
 
 show_query(query)  # Inspect the SQL
 collect(query)     # Run it and retrieve a tibble
@@ -51,7 +51,8 @@ across Athena's output files; sort after retrieval when local order matters.
 
 - [Installation and configuration](docs/installation.md)
 - [Usage, saved results and query behavior](docs/usage.md)
-- [Researcher walkthrough with synthetic data](docs/researcher-walkthrough.md)
+- [Internal researcher runbook](docs/researcher-walkthrough.md)
+- [QA walkthrough with synthetic data](docs/qa-walkthrough.md)
 - [Development and repository structure](docs/development.md)
 - [Testing](tests/README.md)
 - [Releasing](docs/releasing.md)

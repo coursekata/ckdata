@@ -136,16 +136,83 @@ fn destination_workgroup(configuration: Option<ResultConfiguration>) -> WorkGrou
 }
 
 #[test]
+fn client_output_location_respects_workgroup_enforcement_and_keeps_protection_settings() {
+    let override_location = "s3://synthetic-client-results/custom/";
+    for enforced in [false, true] {
+        let configuration = destination_configuration();
+        let mut workgroup = destination_workgroup(Some(configuration.clone()));
+        workgroup
+            .configuration
+            .as_mut()
+            .unwrap()
+            .enforce_work_group_configuration = Some(enforced);
+        let destination =
+            QueryDestination::new(Some(&workgroup), Some(override_location), "token").unwrap();
+        let expected = if enforced {
+            configuration.output_location().unwrap()
+        } else {
+            override_location
+        };
+        assert_eq!(destination.configuration.output_location(), Some(expected));
+        assert_eq!(destination.data_prefix, format!("{expected}ckdata/token/"));
+        assert_eq!(
+            destination.configuration.encryption_configuration(),
+            configuration.encryption_configuration()
+        );
+        assert_eq!(
+            destination.configuration.expected_bucket_owner(),
+            configuration.expected_bucket_owner()
+        );
+        assert_eq!(
+            workgroup.configuration().unwrap().result_configuration(),
+            Some(&configuration)
+        );
+    }
+}
+
+#[test]
+fn client_output_location_supplies_a_missing_location_unless_the_workgroup_enforces_settings() {
+    for has_configuration in [false, true] {
+        let mut workgroup = destination_workgroup(
+            has_configuration.then(|| ResultConfiguration::builder().build()),
+        );
+        let destination = QueryDestination::new(
+            Some(&workgroup),
+            Some("s3://synthetic-client-results"),
+            "token",
+        )
+        .unwrap();
+        assert_eq!(
+            destination.data_prefix,
+            "s3://synthetic-client-results/ckdata/token/"
+        );
+        workgroup
+            .configuration
+            .as_mut()
+            .unwrap()
+            .enforce_work_group_configuration = Some(true);
+        assert!(matches!(
+            QueryDestination::new(
+                Some(&workgroup),
+                Some("s3://synthetic-client-results"),
+                "token"
+            ),
+            Err(Error::InvalidSetting(_))
+        ));
+    }
+}
+
+#[test]
 fn destination_requires_an_enabled_workgroup_and_valid_output_settings() {
     assert!(matches!(
-        QueryDestination::new(None, "token"),
+        QueryDestination::new(None, None, "token"),
         Err(Error::InvalidServiceResponse("GetWorkGroup"))
     ));
     let mut workgroup = destination_workgroup(Some(destination_configuration()));
     for state in [None, Some(WorkGroupState::Disabled)] {
         workgroup.state = state;
         assert!(matches!(
-            QueryDestination::new(Some(&workgroup), "token"),
+            QueryDestination::new(Some(&workgroup), None, "token"),
             Err(Error::InvalidSetting("workgroup must be enabled"))
         ));
     }
@@ -153,7 +220,7 @@ fn destination_requires_an_enabled_workgroup_and_valid_output_settings() {
     for configuration in [workgroup.configuration.take(), None] {
         workgroup.configuration = configuration;
         assert!(matches!(
-            QueryDestination::new(Some(&workgroup), "token"),
+            QueryDestination::new(Some(&workgroup), None, "token"),
             Err(Error::InvalidSetting("workgroup result configuration"))
         ));
     }
@@ -167,7 +234,7 @@ fn destination_requires_an_enabled_workgroup_and_valid_output_settings() {
             .build();
         let workgroup = destination_workgroup(Some(configuration));
         assert!(matches!(
-            QueryDestination::new(Some(&workgroup), "token"),
+            QueryDestination::new(Some(&workgroup), None, "token"),
             Err(Error::InvalidSetting("workgroup output location"))
         ));
     }
@@ -185,7 +252,7 @@ fn destination_requires_an_enabled_workgroup_and_valid_output_settings() {
             .output_location(output)
             .build();
         let workgroup = destination_workgroup(Some(configuration.clone()));
-        let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+        let destination = QueryDestination::new(Some(&workgroup), None, "token").unwrap();
         assert_eq!(destination.data_prefix, format!("{prefix}ckdata/token/"));
         assert_eq!(destination.configuration.output_location(), Some(output));
     }
@@ -227,10 +294,10 @@ fn destination_accepts_only_verifiable_server_side_encryption() {
         let workgroup = destination_workgroup(Some(configuration));
         match expected_error {
             Some(expected) => assert!(matches!(
-                QueryDestination::new(Some(&workgroup), "token"),
+                QueryDestination::new(Some(&workgroup), None, "token"),
                 Err(Error::InvalidSetting(actual)) if actual == expected
             )),
-            None => assert!(QueryDestination::new(Some(&workgroup), "token").is_ok()),
+            None => assert!(QueryDestination::new(Some(&workgroup), None, "token").is_ok()),
         }
     }
 }
@@ -239,7 +306,7 @@ fn destination_accepts_only_verifiable_server_side_encryption() {
 fn destination_allows_an_absent_or_empty_manifest_but_requires_actual_result_output() {
     let configuration = destination_configuration();
     let workgroup = destination_workgroup(Some(configuration.clone()));
-    let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+    let destination = QueryDestination::new(Some(&workgroup), None, "token").unwrap();
     for statistics in [
         None,
         Some(QueryExecutionStatistics::builder().build()),
@@ -279,7 +346,7 @@ fn destination_allows_an_absent_or_empty_manifest_but_requires_actual_result_out
 fn destination_uses_the_same_output_boundary_for_manifest_and_result_locations() {
     let configuration = destination_configuration();
     let workgroup = destination_workgroup(Some(configuration.clone()));
-    let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+    let destination = QueryDestination::new(Some(&workgroup), None, "token").unwrap();
     for (location, valid) in [
         (format!("{OUTPUT}query.txt"), true),
         (format!("{OUTPUT}nested/query.txt"), true),
@@ -335,7 +402,7 @@ fn destination_uses_the_same_output_boundary_for_manifest_and_result_locations()
 fn destination_requires_matching_encryption_and_bucket_owner() {
     let configuration = destination_configuration();
     let workgroup = destination_workgroup(Some(configuration.clone()));
-    let destination = QueryDestination::new(Some(&workgroup), "token").unwrap();
+    let destination = QueryDestination::new(Some(&workgroup), None, "token").unwrap();
     let mut no_encryption = configuration.clone();
     no_encryption.encryption_configuration = None;
     let mut different_encryption = configuration.clone();
@@ -404,6 +471,52 @@ async fn invalid_sql_options_and_pre_cancelled_queries_make_no_requests() {
             cancellation: CancellationStatus::NotSubmitted
         })
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn unload_forwards_client_output_only_when_the_workgroup_allows_it() {
+    const CLIENT_OUTPUT: &str = "s3://synthetic-client-results/custom/";
+    for enforced in [false, true] {
+        let output = if enforced { OUTPUT } else { CLIENT_OUTPUT };
+        let mut group = workgroup();
+        group["WorkGroup"]["Configuration"]["EnforceWorkGroupConfiguration"] = json!(enforced);
+        let mut completed = execution("SUCCEEDED");
+        completed["QueryExecution"]["ResultConfiguration"]["OutputLocation"] =
+            json!(format!("{output}{QUERY_ID}.txt"));
+        completed["QueryExecution"]["Statistics"]["DataManifestLocation"] =
+            json!(format!("{output}{QUERY_ID}-manifest.csv"));
+        let http = replay(vec![
+            (200, group),
+            (200, json!({"QueryExecutionId": QUERY_ID})),
+            (200, completed),
+        ]);
+        let mut options = ConnectionOptions::new("synthetic", "synthetic_schema");
+        options.output_location = Some(CLIENT_OUTPUT.to_owned());
+        let connection =
+            Connection::from_config(options, config().http_client(http.clone()).build())
+                .await
+                .unwrap();
+        let execution = connection
+            .execute_unload(
+                "SELECT 1 AS x",
+                &QueryOptions::default(),
+                &QueryCancellation::new(),
+            )
+            .await
+            .unwrap();
+        let requests = requests(&http);
+        let submitted = &requests[1].1;
+        let mut expected = configuration();
+        expected["OutputLocation"] = json!(output);
+        assert_eq!(submitted["ResultConfiguration"], expected);
+        assert!(
+            submitted["QueryString"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("TO '{output}ckdata/"))
+        );
+        assert!(execution.data_prefix.starts_with(output));
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -593,6 +706,143 @@ async fn cancellation_during_submission_waits_for_query_id_then_stops() {
         *observed.lock().unwrap(),
         ["GetWorkGroup", "StartQueryExecution", "StopQueryExecution"]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn interactive_submission_preserves_network_deadline_and_cancellation_bounds() {
+    for (credential_delay, deadline, cancel_after, expected_wait, transmitted) in [
+        (0, 60, None, 10, true),
+        (15, 60, None, 25, true),
+        (15, 20, None, 20, true),
+        (15, 60, Some(1), 1, false),
+        (0, 60, Some(1), 10, true),
+    ] {
+        assert_submission_timing(
+            Duration::from_secs(credential_delay),
+            Duration::from_secs(deadline),
+            cancel_after.map(Duration::from_secs),
+            Duration::from_secs(expected_wait),
+            transmitted,
+        )
+        .await;
+    }
+}
+
+async fn assert_submission_timing(
+    credential_delay: Duration,
+    deadline: Duration,
+    cancel_after: Option<Duration>,
+    expected_wait: Duration,
+    transmitted: bool,
+) {
+    use aws_credential_types::provider::{self, ProvideCredentials};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    #[derive(Debug)]
+    struct CredentialsAfterDelay {
+        delay: Duration,
+        calls: AtomicUsize,
+    }
+    impl ProvideCredentials for CredentialsAfterDelay {
+        fn provide_credentials<'a>(&'a self) -> provider::future::ProvideCredentials<'a>
+        where
+            Self: 'a,
+        {
+            provider::future::ProvideCredentials::new(async move {
+                if self.calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                    sleep(self.delay).await;
+                }
+                Ok(Credentials::new(
+                    "SYNTHETIC",
+                    "invented",
+                    None,
+                    None,
+                    "test",
+                ))
+            })
+        }
+    }
+    let login = crate::SsoLogin::default();
+    let never = NeverClient::new();
+    let connection = login
+        .scope(Connection::from_auth(
+            ConnectionOptions::new("synthetic", "schema"),
+            crate::auth::ConfiguredAuth {
+                config: config()
+                    .credentials_provider(SharedCredentialsProvider::new(CredentialsAfterDelay {
+                        delay: credential_delay,
+                        calls: AtomicUsize::new(0),
+                    }))
+                    .http_client(never.clone())
+                    .sleep_impl(aws_smithy_async::rt::sleep::TokioSleep::new())
+                    .build(),
+                target: Some(crate::SsoLoginTarget {
+                    profile: "synthetic".into(),
+                    session: None,
+                    config: None,
+                }),
+                role_binding: None,
+            },
+        ))
+        .await
+        .unwrap();
+    let client = Client::from_conf(
+        aws_sdk_athena::config::Builder::from(connection.aws_config())
+            .timeout_config(
+                TimeoutConfig::builder()
+                    .operation_timeout(Duration::from_secs(1800))
+                    .build(),
+            )
+            .build(),
+    );
+    let destination = QueryDestination::new(
+        Some(&destination_workgroup(Some(destination_configuration()))),
+        None,
+        "synthetic-token",
+    )
+    .unwrap();
+    let start = Instant::now();
+    let cancellation = Arc::new(QueryCancellation::new());
+    if let Some(after) = cancel_after {
+        let token = cancellation.clone();
+        tokio::spawn(async move {
+            sleep(after).await;
+            token.cancel();
+        });
+    }
+    let guard = RequestGuard {
+        connection: &connection,
+        cancellation: &cancellation,
+        deadline: start + deadline,
+    };
+    let result = login
+        .scope(connection.submit_unload(
+            &client,
+            "UNLOAD (SELECT 1)".into(),
+            &QueryOptions::default(),
+            &destination,
+            "synthetic-token",
+            &guard,
+        ))
+        .await;
+    if transmitted {
+        assert!(
+            matches!(result, Err(Error::QuerySubmission { outcome_unknown: true, request_token, .. }) if request_token == "synthetic-token")
+        );
+    } else {
+        assert!(matches!(
+            result,
+            Err(Error::QueryInterrupted {
+                query_id: None,
+                reason: QueryInterruption::Cancelled,
+                cancellation: CancellationStatus::NotSubmitted
+            })
+        ));
+    }
+    assert_eq!(never.num_calls(), usize::from(transmitted));
+    assert_eq!(start.elapsed(), expected_wait);
 }
 
 #[tokio::test]
@@ -858,55 +1108,4 @@ async fn sdk_transient_retries_keep_submission_token_and_destination_unchanged()
     assert_eq!(requests[1].1, requests[2].1);
     assert_eq!(requests[3].0, "GetQueryExecution");
     assert_eq!(requests[3].1, requests[4].1);
-}
-
-#[tokio::test(start_paused = true)]
-async fn role_expiry_interrupts_polling_and_does_not_fall_back_to_source_credentials() {
-    let mut events = vec![ReplayEvent::new(http::Request::new(SdkBody::empty()), http::Response::builder()
-        .status(200).header("content-type", "text/xml").body(SdkBody::from(r#"<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASSUMED_SYNTHETIC</AccessKeyId><SecretAccessKey>synthetic-role-secret</SecretAccessKey><SessionToken>synthetic-role-token</SessionToken><Expiration>2024-01-01T00:00:02Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>"#)).unwrap())];
-    for body in [
-        workgroup(),
-        json!({"QueryExecutionId": QUERY_ID}),
-        execution("RUNNING"),
-    ] {
-        events.push(ReplayEvent::new(
-            http::Request::new(SdkBody::empty()),
-            http::Response::builder()
-                .status(200)
-                .header("content-type", "application/x-amz-json-1.1")
-                .body(SdkBody::from(body.to_string()))
-                .unwrap(),
-        ));
-    }
-    let http = StaticReplayClient::new(events);
-    let mut options = ConnectionOptions::new("synthetic", "schema");
-    options.role_arn = Some("arn:aws:iam::000000000000:role/synthetic-reader".into());
-    let connection = Connection::from_config(options, config().http_client(http.clone()).build())
-        .await
-        .unwrap();
-    let options = QueryOptions {
-        poll_interval: Duration::from_secs(10),
-        ..QueryOptions::default()
-    };
-    let error = connection
-        .execute_unload("SELECT 1", &options, &QueryCancellation::new())
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(error, Error::QueryInterrupted { query_id: Some(id), reason: QueryInterruption::SessionExpired, cancellation: CancellationStatus::Unconfirmed } if id == QUERY_ID)
-    );
-    assert_eq!(http.actual_requests().count(), 4);
-    for request in http.actual_requests().skip(1) {
-        assert!(
-            request
-                .headers()
-                .get("authorization")
-                .unwrap()
-                .contains("ASSUMED_SYNTHETIC")
-        );
-    }
-    assert!(matches!(
-        connection.session_status(),
-        Err(Error::ExpiredRole)
-    ));
 }

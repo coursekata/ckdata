@@ -1,7 +1,11 @@
 lake_state <- rlang::new_environment()
-lake_state$tables <- tibble::tibble(path = character(), table = character(), column = character())
+lake_state$tables <- tibble::tibble(
+  path = character(),
+  table = character(),
+  column = character()
+)
 
-#' A lazy table in the CourseKata data lake
+#' A lazy table in Amazon Athena
 #'
 #' Named-table discovery uses catalog metadata without reading rows. Building
 #' a pipeline or calling `show_query()` does not execute it. As with other
@@ -24,7 +28,9 @@ lake_tbl <- function(table, schema = ckdata_schema(), freshness = NULL) {
   table <- single_string(table, "table")
   schema <- single_string(schema, "schema")
   tbl <- dplyr::tbl(lake_con(), DBI::Id(schema = schema, table = table))
-  tbl$lazy_query$ckdata_freshness <- if (!rlang::is_null(freshness)) list(freshness)
+  tbl$lazy_query$ckdata_freshness <- if (!rlang::is_null(freshness)) {
+    list(freshness)
+  }
   class(tbl) <- c("tbl_ckdata_lake", class(tbl))
   register_lake_table(tbl)
   tbl
@@ -67,17 +73,20 @@ register_lake_table <- function(tbl) {
 lake_table_columns <- function(tbl) {
   path <- dbplyr::remote_table(tbl)
   table <- dbplyr::remote_name(tbl)
-  tibble::tibble(path = as.character(path), table = table, column = colnames(tbl))
+  tibble::tibble(
+    path = as.character(path),
+    table = table,
+    column = colnames(tbl)
+  )
 }
 
 lake_con <- function() {
-  # A fixed-role expiry is not permission to open a new session. Only initial
-  # use or an explicitly disconnected connection opens another connection.
-  if (rlang::is_null(lake_state$con) || !rlang::is_true(lake_state$con@state$open)) {
-    lake_state$con <- DBI::dbConnect(ckdata(),
-      profile = lake_env("CK_DATALAKE_INTERNAL_PROFILE", required = FALSE),
-      region = lake_env("CK_DATALAKE_REGION", required = FALSE)
-    )
+  # Credential renewal retains this connection and its source configuration.
+  # Only initial use or explicit disconnection selects new settings.
+  if (
+    rlang::is_null(lake_state$con) || !rlang::is_true(lake_state$con@state$open)
+  ) {
+    lake_state$con <- DBI::dbConnect(ckdata())
     lake_state$tables <- lake_state$tables[0, ]
   }
   lake_state$con
@@ -88,22 +97,15 @@ lake_con <- function() {
 #' The next call to [lake_tbl()] or [lake_query()] opens a new connection using
 #' the current settings. Saved lazy queries keep their original connection;
 #' rebuild them from a fresh `lake_tbl()` before collecting results.
-#' Use this explicitly after an assumed-role session expires or before changing
+#' Use this explicitly before changing
 #' connection settings. Calling it before a session exists does not connect.
 #' @return Invisibly, `TRUE`.
 #' @export
 lake_disconnect <- function() {
-  if (!rlang::is_null(lake_state$con) && rlang::is_true(lake_state$con@state$open)) {
+  if (
+    !rlang::is_null(lake_state$con) && rlang::is_true(lake_state$con@state$open)
+  ) {
     DBI::dbDisconnect(lake_state$con)
   }
   invisible(TRUE)
-}
-
-lake_env <- function(name, required = TRUE) {
-  value <- Sys.getenv(name, unset = "")
-  if (nzchar(value)) {
-    return(value)
-  }
-  if (required) cli::cli_abort("ckdata: {.envvar {name}} is not set; see {.help ckdata_settings}")
-  NULL
 }

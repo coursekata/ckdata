@@ -9,12 +9,6 @@ use crate::{Connection, Error, QueryCancellation, QueryInterruption, QueryOption
 mod decode;
 pub(crate) mod transport;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum QueryWarning {
-    /// Hosts should display this before presenting the next result.
-    SessionExpiring { remaining: std::time::Duration },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ResultError {
     #[error("invalid manifest: {0}")]
@@ -36,7 +30,6 @@ pub struct QueryResult {
     query_id: String,
     schema: SchemaRef,
     batches: Vec<RecordBatch>,
-    warnings: Vec<QueryWarning>,
 }
 
 impl std::fmt::Debug for QueryResult {
@@ -46,7 +39,6 @@ impl std::fmt::Debug for QueryResult {
             .field("query_id", &self.query_id)
             .field("schema", &self.schema)
             .field("row_count", &self.row_count())
-            .field("warnings", &self.warnings)
             .finish_non_exhaustive()
     }
 }
@@ -61,21 +53,12 @@ impl QueryResult {
     pub fn batches(&self) -> &[RecordBatch] {
         &self.batches
     }
-    pub fn warnings(&self) -> &[QueryWarning] {
-        &self.warnings
-    }
     pub fn row_count(&self) -> usize {
         self.batches.iter().map(RecordBatch::num_rows).sum()
     }
-    /// Transfer the Arrow data and schema. Read warnings first, or use
-    /// into_reader_with_warnings to retain them alongside the reader.
+    /// Transfer the Arrow data and schema.
     pub fn into_reader(self) -> impl RecordBatchReader + Send {
         RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema)
-    }
-    pub fn into_reader_with_warnings(self) -> (impl RecordBatchReader + Send, Vec<QueryWarning>) {
-        let warnings = self.warnings;
-        let reader = RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema);
-        (reader, warnings)
     }
 }
 
@@ -171,12 +154,10 @@ impl Connection {
                 ResultError::InvalidSchema("result has no Parquet schema"),
             )
         })?;
-        let warnings = self.result_warnings(&execution.query_id)?;
         Ok(QueryResult {
             query_id: execution.query_id,
             schema,
             batches,
-            warnings,
         })
     }
 
@@ -198,28 +179,11 @@ impl Connection {
         let (query_id, schema) = self
             .recover_empty_schema(crate::query::query_text(sql)?, options, &guard)
             .await?;
-        let warnings = self.result_warnings(&query_id)?;
         Ok(QueryResult {
             query_id,
             schema,
             batches: Vec::new(),
-            warnings,
         })
-    }
-
-    fn result_warnings(&self, query_id: &str) -> Result<Vec<QueryWarning>, Error> {
-        let mut warnings = Vec::new();
-        if let crate::SessionStatus::Expiring { remaining, .. } =
-            self.session_status().map_err(|_| {
-                result_error(
-                    query_id,
-                    ResultError::Interrupted(QueryInterruption::SessionExpired),
-                )
-            })?
-        {
-            warnings.push(QueryWarning::SessionExpiring { remaining });
-        }
-        Ok(warnings)
     }
 
     async fn recover_empty_schema(

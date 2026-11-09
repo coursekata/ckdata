@@ -42,8 +42,8 @@ enum Mode {
     ManifestFailure,
     MissingResultSet,
     InvalidParquet,
-    Expiring,
-    ExpiringNoFiles,
+    Role,
+    RoleNoFiles,
     NestedNoFiles,
     NoFilesAgain,
     RecoveryRows,
@@ -64,7 +64,7 @@ impl Mode {
         matches!(
             self,
             Self::NoFiles
-                | Self::ExpiringNoFiles
+                | Self::RoleNoFiles
                 | Self::NestedNoFiles
                 | Self::NoFilesAgain
                 | Self::RecoveryRows
@@ -586,7 +586,7 @@ impl ServiceFixture {
     }
 
     fn sts(&self, state: &mut State) -> http::Response<Vec<u8>> {
-        assert!(matches!(self.mode, Mode::Expiring | Mode::ExpiringNoFiles));
+        assert!(matches!(self.mode, Mode::Role | Mode::RoleNoFiles));
         state.requests.push("AssumeRole".into());
         let response = r#"<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASSUMED_TEST</AccessKeyId><SecretAccessKey>synthetic</SecretAccessKey><SessionToken>synthetic</SessionToken><Expiration>2024-01-01T00:10:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>"#;
         http::Response::builder()
@@ -869,7 +869,7 @@ async fn service_with_files(
         .http_client(http)
         .build();
     let mut options = ConnectionOptions::new("synthetic", "schema");
-    if matches!(mode, Mode::Expiring | Mode::ExpiringNoFiles) {
+    if matches!(mode, Mode::Role | Mode::RoleNoFiles) {
         options.role_arn = Some("arn:aws:iam::000000000000:role/synthetic".into());
     }
     let connection = Connection::from_config(options, config).await.unwrap();
@@ -877,22 +877,17 @@ async fn service_with_files(
 }
 
 #[tokio::test]
-async fn successful_query_surfaces_expiry_and_reader_conversion_retains_warnings() {
-    let (connection, _) = service(Mode::Expiring, None).await;
+async fn renewable_role_results_transfer_to_the_arrow_reader() {
+    let (connection, _) = service(Mode::Role, None).await;
     let result = connection
         .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
         .await
         .unwrap();
-    assert!(
-        matches!(result.warnings(),[QueryWarning::SessionExpiring{remaining}] if *remaining<=std::time::Duration::from_secs(600))
-    );
-    let (reader, warnings) = result.into_reader_with_warnings();
-    assert!(matches!(
-        warnings.as_slice(),
-        [QueryWarning::SessionExpiring { .. }]
-    ));
     assert_eq!(
-        reader.map(|batch| batch.unwrap().num_rows()).sum::<usize>(),
+        result
+            .into_reader()
+            .map(|batch| batch.unwrap().num_rows())
+            .sum::<usize>(),
         4
     );
 }
@@ -1027,7 +1022,6 @@ async fn public_query_preserves_values_without_rewriting_sql_or_sorting_rows() {
         .await
         .unwrap();
     assert_eq!(result.row_count(), 4);
-    assert!(result.warnings().is_empty());
     let expected_schema = Schema::new(vec![
         Field::new("label", DataType::Utf8, true),
         Field::new("n", DataType::Int64, true),
@@ -1083,7 +1077,7 @@ async fn public_query_preserves_values_without_rewriting_sql_or_sorting_rows() {
 
 #[tokio::test]
 async fn fileless_empty_results_recover_schema_without_returning_probe_rows() {
-    for mode in [Mode::NoFiles, Mode::ExpiringNoFiles, Mode::RecoveryRows] {
+    for mode in [Mode::NoFiles, Mode::RoleNoFiles, Mode::RecoveryRows] {
         let (connection, state) = service(mode, None).await;
         let result = connection
             .query(SQL, &QueryOptions::default(), &QueryCancellation::new())
@@ -1097,15 +1091,9 @@ async fn fileless_empty_results_recover_schema_without_returning_probe_rows() {
             DataType::List(_)
         ));
         assert!(result.batches().is_empty());
-        let (reader, warnings) = result.into_reader_with_warnings();
+        let reader = result.into_reader();
         assert_eq!(reader.schema().fields().len(), 7);
         assert_eq!(reader.count(), 0);
-        if matches!(mode, Mode::ExpiringNoFiles) {
-            assert!(matches!(
-                warnings.as_slice(),
-                [QueryWarning::SessionExpiring { .. }]
-            ));
-        }
         let state = state.lock().unwrap();
         assert_eq!(
             state

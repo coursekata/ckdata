@@ -26,27 +26,41 @@ daily_at <- function(at, tz) {
   if (!grepl("^([01][0-9]|2[0-3]):[0-5][0-9]$", at)) {
     rlang::abort("ckdata: `at` must be a time in HH:MM format")
   }
-  if (!tz %in% OlsonNames()) rlang::abort("ckdata: `tz` must be a recognized IANA timezone")
+  if (!tz %in% OlsonNames()) {
+    rlang::abort("ckdata: `tz` must be a recognized IANA timezone")
+  }
   structure(list(at = at, tz = tz), class = "ckdata_daily")
 }
 
 #' @rdname daily_at
 #' @export
 freshness_check <- function(check, every = 300) {
-  if (!is.function(check)) rlang::abort("ckdata: `check` must be a function accepting a connection")
+  if (!is.function(check)) {
+    rlang::abort("ckdata: `check` must be a function accepting a connection")
+  }
   rlang::check_number_decimal(every, min = 0, max = Inf)
-  structure(list(
-    check = check, every = every,
-    revisions = cachem::cache_mem(max_age = every, evict = "fifo")
-  ), class = "ckdata_revision")
+  structure(
+    list(
+      check = check,
+      every = every,
+      revisions = cachem::cache_mem(max_age = every, evict = "fifo")
+    ),
+    class = "ckdata_revision"
+  )
 }
 
 check_freshness <- function(x) {
-  if (rlang::is_null(x) || rlang::is_string(x, "always") || is.function(x) ||
-    inherits(x, c("ckdata_daily", "ckdata_revision"))) {
+  if (
+    rlang::is_null(x) ||
+      rlang::is_string(x, "always") ||
+      is.function(x) ||
+      inherits(x, c("ckdata_daily", "ckdata_revision"))
+  ) {
     return(invisible(x))
   }
-  rlang::abort("ckdata: `freshness` must be NULL, 'always', daily_at(), freshness_check(), or a revision-checking function")
+  rlang::abort(
+    "ckdata: `freshness` must be NULL, 'always', daily_at(), freshness_check(), or a revision-checking function"
+  )
 }
 
 default_freshness <- function() {
@@ -55,8 +69,8 @@ default_freshness <- function() {
     check_freshness(policy)
     return(policy)
   }
-  at <- lake_env("CKDATA_FRESHNESS_AT", required = FALSE)
-  tz <- lake_env("CKDATA_FRESHNESS_TZ", required = FALSE)
+  at <- config_env("CKDATA_FRESHNESS_AT")
+  tz <- config_env("CKDATA_FRESHNESS_TZ")
   if (rlang::is_null(at) && rlang::is_null(tz)) {
     return("always")
   }
@@ -73,7 +87,9 @@ query_freshness <- function(query) {
   }
   first <- policies[[1L]]
   if (!purrr::every(policies, function(x) identical(x, first))) {
-    rlang::abort("ckdata: joined tables have different freshness policies; supply `freshness` to collect_saved()")
+    rlang::abort(
+      "ckdata: joined tables have different freshness policies; supply `freshness` to collect_saved()"
+    )
   }
   first
 }
@@ -105,7 +121,8 @@ collapse.tbl_ckdata <- function(x, ...) {
 
 resolve_freshness <- function(query, con, policy) {
   check_freshness(policy)
-  policy %||% query_freshness(query) %||%
+  policy %||%
+    query_freshness(query) %||%
     (if (inherits(con, "CkConnection")) con@state$freshness else NULL) %||%
     default_freshness()
 }
@@ -113,7 +130,11 @@ resolve_freshness <- function(query, con, policy) {
 daily_boundary <- function(policy, now) {
   day <- as.Date(format(now, tz = policy$tz, format = "%Y-%m-%d"))
   boundaries <- as.POSIXct(paste(day - c(0, 1), policy$at), tz = "UTC")
-  boundaries <- lubridate::force_tz(boundaries, policy$tz, roll_dst = c("boundary", "pre"))
+  boundaries <- lubridate::force_tz(
+    boundaries,
+    policy$tz,
+    roll_dst = c("boundary", "pre")
+  )
   max(boundaries[boundaries <= now])
 }
 
@@ -122,7 +143,11 @@ source_revision <- function(policy, con, context) {
     return(single_string(policy(con), "source revision"))
   }
   key <- digest::digest(context, algo = "sha256")
-  revision <- if (policy$every > 0) policy$revisions$get(key, missing = NULL) else NULL
+  revision <- if (policy$every > 0) {
+    policy$revisions$get(key, missing = NULL)
+  } else {
+    NULL
+  }
   if (rlang::is_null(revision)) {
     revision <- single_string(policy$check(con), "source revision")
     if (policy$every > 0) policy$revisions$set(key, revision)
@@ -135,11 +160,15 @@ saved_is_fresh <- function(saved, policy, revision, now) {
     return(FALSE)
   }
   if (inherits(policy, "ckdata_daily")) {
-    return(saved$info$fetched_at <= as.numeric(now) &&
-      saved$info$fetched_at >= as.numeric(daily_boundary(policy, now)))
+    return(
+      saved$info$fetched_at <= as.numeric(now) &&
+        saved$info$fetched_at >= as.numeric(daily_boundary(policy, now))
+    )
   }
   if (inherits(policy, "ckdata_revision") || is.function(policy)) {
-    return(!rlang::is_null(revision) && identical(saved$info$revision, revision))
+    return(
+      !rlang::is_null(revision) && identical(saved$info$revision, revision)
+    )
   }
   FALSE
 }

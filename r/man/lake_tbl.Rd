@@ -2,7 +2,7 @@
 % Please edit documentation in R/lake.R
 \name{lake_tbl}
 \alias{lake_tbl}
-\title{A lazy table in the CourseKata data lake}
+\title{A lazy table in Amazon Athena}
 \usage{
 lake_tbl(table, schema = ckdata_schema(), freshness = NULL)
 }

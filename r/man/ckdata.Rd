@@ -52,19 +52,26 @@
 \alias{dbIsReadOnly,CkDriver-method}
 \alias{dbIsReadOnly,CkConnection-method}
 \alias{dbIsReadOnly,CkResult-method}
-\title{CourseKata's read-only DBI driver}
+\title{A read-only DBI driver for Amazon Athena}
 \usage{
 ckdata()
 
 \S4method{dbConnect}{CkDriver}(
   drv,
-  workgroup = getOption("ckdata.workgroup", Sys.getenv("CK_DATALAKE_WORKGROUP")),
+  workgroup = getOption("ckdata.workgroup", config_env("CKDATA_WORKGROUP")),
   schema = ckdata_schema(),
-  profile = NULL,
-  region = NULL,
-  role_arn = lake_env("CK_DATALAKE_ROLE_ARN", required = FALSE),
+  profile = config_env("CKDATA_PROFILE"),
+  region = config_env("CKDATA_REGION"),
+  role_arn = config_env("CKDATA_ROLE_ARN"),
   freshness = NULL,
   login = getOption("ckdata.login", rlang::is_interactive()),
+  output_location = config_env("CKDATA_OUTPUT_LOCATION"),
+  sso_start_url = NULL,
+  sso_region = NULL,
+  sso_account_id = NULL,
+  sso_role_name = NULL,
+  sso_session = NULL,
+  sso_registration_scopes = NULL,
   ...
 )
 
@@ -159,13 +166,15 @@ ckdata()
 \arguments{
 \item{drv}{A driver returned by \code{ckdata()}.}
 
-\item{workgroup}{Athena workgroup, or \code{CK_DATALAKE_WORKGROUP}.}
+\item{workgroup}{Athena workgroup, or \code{CKDATA_WORKGROUP}.}
 
 \item{schema}{Default database, or \code{\link[=ckdata_schema]{ckdata_schema()}}.}
 
 \item{profile, region}{Optional explicit AWS profile and region.}
 
-\item{role_arn}{Optional role to assume once; defaults to \code{CK_DATALAKE_ROLE_ARN}.}
+\item{role_arn}{Optional required role; defaults to \code{CKDATA_ROLE_ARN}. AWS
+renews its credentials while the source permits. Failure never falls back
+to the source identity for data access.}
 
 \item{freshness}{Optional default policy for \code{\link[=collect_saved]{collect_saved()}} on this
 connection. NULL inherits application defaults at collection time.}
@@ -173,8 +182,25 @@ connection. NULL inherits application defaults at collection time.}
 \item{login}{Allow AWS SSO browser sign-in when credentials require it.
 Defaults to option \code{ckdata.login}, or \code{interactive()} when unset.
 FALSE fails immediately without starting login. TRUE permits one login
-and one connection retry. Requires AWS CLI v2; existing credentials and
+per top-level connection, query or fetch. Requires AWS CLI v2; existing credentials and
 non-SSO authentication do not require it.}
+
+\item{output_location}{Optional S3 result prefix, or \code{CKDATA_OUTPUT_LOCATION}.
+Enforced workgroup settings take precedence. Otherwise this overrides the
+workgroup's location, or supplies one when it is missing.}
+
+\item{sso_start_url, sso_region, sso_account_id, sso_role_name}{Independent SSO
+configuration. Each argument overrides its \verb{CKDATA_SSO_*} environment value.
+An explicit \code{profile} ignores SSO environment settings; individual SSO
+arguments may override a plain SSO profile. Overrides of chained profiles
+are rejected. Complete direct SSO does not inherit an ambient role chain.
+The SSO region is independent from the Athena service region.}
+
+\item{sso_session}{Optional shared AWS SSO login-session name, or
+\code{CKDATA_SSO_SESSION}. Direct SSO generates a stable name by default.}
+
+\item{sso_registration_scopes}{Optional AWS SSO registration scopes, or
+\code{CKDATA_SSO_REGISTRATION_SCOPES}; defaults to \code{sso:account:access}.}
 
 \item{...}{Additional arguments; unsupported arguments raise an error.}
 
@@ -217,5 +243,5 @@ described by their corresponding DBI generics.
 Connect with \code{DBI::dbConnect(ckdata::ckdata(), workgroup = ..., schema = ...)}.
 Credentials and region follow the standard AWS SDK configuration. Supplying
 \code{profile} or \code{region} overrides discovery for this connection. An explicit
-\code{role_arn} is assumed once, for at most one hour, and is never renewed.
+\code{role_arn} requires an additional role using AWS-managed credential renewal.
 }

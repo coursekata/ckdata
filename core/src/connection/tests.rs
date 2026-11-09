@@ -1,12 +1,12 @@
 use super::*;
+use aws_config::ConfigLoader;
 use aws_config::retry::RetryConfig;
+use aws_credential_types::{Credentials, provider};
 use aws_smithy_async::time::StaticTimeSource;
-use aws_smithy_http_client::test_util::{
-    NeverClient, ReplayEvent, StaticReplayClient, infallible_client_fn,
-};
+use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
 use aws_smithy_types::body::SdkBody;
 use aws_types::os_shim_internal::{Env, Fs};
-use std::error::Error as StdError;
+use std::time::Duration;
 
 const EPOCH: u64 = 1_704_067_200;
 const ROLE: &str = "arn:aws:iam::000000000000:role/synthetic-reader";
@@ -32,56 +32,8 @@ fn loader(extra: &[(&str, &str)]) -> ConfigLoader {
 }
 
 #[tokio::test]
-async fn standard_sources_keep_environment_credentials_ahead_of_named_profile() {
-    let mut opts = options();
-    opts.profile = Some("analyst".into());
-    let config = load_config(
-        &opts,
-        loader(&[
-            ("AWS_ACCESS_KEY_ID", "ENVIRONMENT_KEY"),
-            ("AWS_SECRET_ACCESS_KEY", "synthetic-environment-secret"),
-            ("AWS_REGION", "ap-southeast-2"),
-        ]),
-    )
-    .await
-    .unwrap();
-    let credentials = config
-        .credentials_provider()
-        .unwrap()
-        .provide_credentials()
-        .await
-        .unwrap();
-    assert_eq!(credentials.access_key_id(), "ENVIRONMENT_KEY");
-    assert_eq!(config.region().unwrap().as_ref(), "ap-southeast-2");
-    let connection = Connection::from_config(opts, config).await.unwrap();
-    assert_eq!(
-        connection.session_status().unwrap(),
-        SessionStatus::Standard
-    );
-}
-
-#[tokio::test]
-async fn explicit_profile_and_region_override_discovery_without_changing_credentials() {
-    let mut opts = options();
-    opts.profile = Some("analyst".into());
-    opts.region = Some("eu-central-1".into());
-    let config = load_config(&opts, loader(&[("AWS_REGION", "ap-southeast-2")]))
-        .await
-        .unwrap();
-    let credentials = config
-        .credentials_provider()
-        .unwrap()
-        .provide_credentials()
-        .await
-        .unwrap();
-    assert_eq!(credentials.access_key_id(), "PROFILE_KEY");
-    let connection = Connection::from_config(opts, config).await.unwrap();
-    assert_eq!(connection.region(), "eu-central-1");
-}
-
-#[tokio::test]
 async fn profile_environment_selects_the_profile_without_an_explicit_override() {
-    let connection = Connection::with_loader(options(), loader(&[("AWS_PROFILE", "analyst")]))
+    let connection = with_loader(options(), loader(&[("AWS_PROFILE", "analyst")]))
         .await
         .unwrap();
     assert_eq!(connection.region(), "eu-west-1");
@@ -97,9 +49,7 @@ async fn profile_environment_selects_the_profile_without_an_explicit_override() 
 
 #[tokio::test]
 async fn missing_credentials_and_invalid_settings_fail_without_network_or_real_files() {
-    let error = Connection::with_loader(options(), loader(&[]))
-        .await
-        .unwrap_err();
+    let error = with_loader(options(), loader(&[])).await.unwrap_err();
     assert!(matches!(error, Error::CredentialsUnavailable));
     for opts in [
         ConnectionOptions::new("", "schema"),
@@ -108,9 +58,13 @@ async fn missing_credentials_and_invalid_settings_fail_without_network_or_real_f
             role_arn: Some("arn:aws:iam::000000000000:user/not-a-role".into()),
             ..options()
         },
+        ConnectionOptions {
+            output_location: Some("https://invalid.example/results/".into()),
+            ..options()
+        },
     ] {
         assert!(matches!(
-            Connection::with_loader(opts, loader(&[])).await,
+            with_loader(opts, loader(&[])).await,
             Err(Error::InvalidSetting(_))
         ));
     }
@@ -158,10 +112,6 @@ async fn standard_connections_retain_their_refreshing_source_provider() {
         .unwrap();
     assert_eq!(refreshed.access_key_id(), "SOURCE_1");
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        connection.session_status().unwrap(),
-        SessionStatus::Standard
-    );
 }
 
 #[tokio::test]
@@ -257,215 +207,6 @@ async fn identity_check_returns_only_account_and_arn_without_a_data_query() {
         .collect();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].contains("Action=GetCallerIdentity"));
-}
-
-#[tokio::test(start_paused = true)]
-async fn one_role_assumption_warns_at_fifteen_minutes_and_cannot_renew_at_expiry() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    // A credential-free rejection keeps an unexpected renewal visible without
-    // adding an unused secret-bearing mock response to the debug output.
-    let http = StaticReplayClient::new(
-        [
-            (200, response("2024-01-01T01:00:00Z")),
-            (400, String::new()),
-        ]
-        .into_iter()
-        .map(|(status, body)| {
-            ReplayEvent::new(
-                http::Request::new(SdkBody::empty()),
-                http::Response::builder()
-                    .status(status)
-                    .header("content-type", "text/xml")
-                    .body(SdkBody::from(body))
-                    .unwrap(),
-            )
-        })
-        .collect(),
-    );
-    let opts = ConnectionOptions {
-        role_arn: Some(ROLE.into()),
-        ..options()
-    };
-    let connection = Connection::from_config(opts, config(http.clone()))
-        .await
-        .unwrap();
-    let clone = connection.clone();
-    assert!(matches!(
-        connection.session_status(),
-        Ok(SessionStatus::Assumed { .. })
-    ));
-    let provider = connection.config.credentials_provider().unwrap();
-    assert_eq!(
-        provider
-            .provide_credentials()
-            .await
-            .unwrap()
-            .access_key_id(),
-        "ASSUMED_KEY"
-    );
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = attempts.clone();
-    let athena = aws_sdk_athena::Client::from_conf(
-        aws_sdk_athena::config::Builder::from(&connection.config)
-            .http_client(infallible_client_fn(move |request| {
-                observed.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(
-                    request.headers()["x-amz-target"],
-                    "AmazonAthena.GetWorkGroup"
-                );
-                http::Response::builder()
-                    .status(200)
-                    .header("content-type", "application/x-amz-json-1.1")
-                    .body(r#"{"WorkGroup":{"Name":"synthetic","State":"ENABLED"}}"#)
-                    .unwrap()
-            }))
-            .build(),
-    );
-    let primed = tokio::time::timeout(
-        Duration::from_secs(1),
-        athena.get_work_group().work_group("synthetic").send(),
-    )
-    .await
-    .expect("the synthetic request must finish before expiry")
-    .unwrap();
-    assert_eq!(primed.work_group().unwrap().name(), "synthetic");
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-
-    tokio::time::advance(Duration::from_secs(2699)).await;
-    assert!(matches!(
-        connection.session_status(),
-        Ok(SessionStatus::Assumed { .. })
-    ));
-    tokio::time::advance(Duration::from_secs(1)).await;
-    assert!(
-        matches!(connection.session_status(), Ok(SessionStatus::Expiring { remaining, .. }) if remaining == WARNING_WINDOW)
-    );
-    tokio::time::advance(WARNING_WINDOW).await;
-    assert!(matches!(
-        connection.session_status(),
-        Err(Error::ExpiredRole)
-    ));
-    assert!(matches!(clone.session_status(), Err(Error::ExpiredRole)));
-    assert!(matches!(
-        provider.provide_credentials().await,
-        Err(CredentialsError::ProviderError(_))
-    ));
-    assert!(provider.fallback_on_interrupt().is_none());
-    // Reuse the primed client so an SDK identity cached before expiry cannot
-    // bypass the fixed lease. Bound the wait if credential resolution regresses.
-    let before_expired_request = attempts.load(Ordering::SeqCst);
-    let sent = tokio::time::timeout(
-        Duration::from_secs(1),
-        athena.get_work_group().work_group("synthetic").send(),
-    )
-    .await;
-    assert_eq!(
-        attempts.load(Ordering::SeqCst),
-        before_expired_request,
-        "expired credentials must prevent HTTP"
-    );
-    let error = sent
-        .expect("expired credential rejection must finish without waiting for HTTP")
-        .expect_err("expired credentials must reject the SDK request");
-    let credentials_error =
-        std::iter::successors(Some(&error as &(dyn StdError + 'static)), |error| {
-            (*error).source()
-        })
-        .find_map(|error| error.downcast_ref::<CredentialsError>())
-        .expect("the SDK failure must retain the credential provider error");
-    assert!(matches!(
-        credentials_error,
-        CredentialsError::ProviderError(_)
-    ));
-    assert_eq!(
-        credentials_error.source().unwrap().to_string(),
-        "assumed-role session expired"
-    );
-    assert_eq!(
-        http.actual_requests().count(),
-        1,
-        "expiration must not call STS again"
-    );
-    let requests: Vec<_> = http
-        .actual_requests()
-        .map(|request| String::from_utf8_lossy(request.body().bytes().unwrap()).into_owned())
-        .collect();
-    assert!(requests[0].contains("DurationSeconds=3600"));
-    assert!(
-        requests[0].contains("RoleArn=arn%3Aaws%3Aiam%3A%3A000000000000%3Arole%2Fsynthetic-reader")
-    );
-    let debug = format!("{connection:?}");
-    assert!(!debug.contains("synthetic-role-secret"));
-    assert!(!debug.contains("synthetic-role-token"));
-}
-
-#[tokio::test(start_paused = true)]
-async fn server_expiry_can_shorten_but_cannot_extend_the_one_hour_lease() {
-    for (expiration, remaining) in [
-        ("2024-01-01T00:05:00Z", 300),
-        ("2024-01-01T02:00:00Z", 3600),
-    ] {
-        let http = replay(200, response(expiration));
-        let connection = Connection::from_config(
-            ConnectionOptions {
-                role_arn: Some(ROLE.into()),
-                ..options()
-            },
-            config(http),
-        )
-        .await
-        .unwrap();
-        tokio::time::advance(Duration::from_secs(remaining - 1)).await;
-        assert!(matches!(
-            connection.session_status(),
-            Ok(SessionStatus::Expiring { remaining, .. }) if remaining == Duration::from_secs(1)
-        ));
-        assert!(
-            connection
-                .config
-                .credentials_provider()
-                .unwrap()
-                .provide_credentials()
-                .await
-                .is_ok()
-        );
-        tokio::time::advance(Duration::from_secs(1)).await;
-        assert!(matches!(
-            connection.session_status(),
-            Err(Error::ExpiredRole)
-        ));
-    }
-}
-
-#[tokio::test(start_paused = true)]
-async fn selecting_a_schema_shares_the_original_role_lease_without_authenticating() {
-    let http = replay(200, response("2024-01-01T01:00:00Z"));
-    let connection = Connection::from_config(
-        ConnectionOptions {
-            role_arn: Some(ROLE.into()),
-            ..options()
-        },
-        config(http.clone()),
-    )
-    .await
-    .unwrap();
-    tokio::time::advance(Duration::from_secs(3500)).await;
-    let selected = connection.with_schema("another_schema").unwrap();
-    assert_eq!(selected.options().schema, "another_schema");
-    assert_eq!(connection.options().schema, "synthetic_schema");
-    assert_eq!(selected.region(), connection.region());
-    assert_eq!(
-        selected.session_status().unwrap(),
-        connection.session_status().unwrap()
-    );
-    assert!(connection.with_schema("").is_err());
-    tokio::time::advance(Duration::from_secs(100)).await;
-    assert!(matches!(selected.session_status(), Err(Error::ExpiredRole)));
-    assert_eq!(http.actual_requests().count(), 1);
 }
 
 #[tokio::test]
@@ -632,9 +373,45 @@ async fn catalog_failure_retains_code_and_modeled_guidance() {
     ));
 }
 
-#[tokio::test(start_paused = true)]
-async fn expired_connection_rejects_catalog_calls_before_any_metadata_request() {
-    let http = replay(200, response("2024-01-01T01:00:00Z"));
+async fn with_loader(
+    opts: ConnectionOptions,
+    mut loader: ConfigLoader,
+) -> Result<Connection, Error> {
+    opts.validate()?;
+    if let Some(region) = &opts.region {
+        loader = loader.region(Region::new(region.clone()));
+    }
+    Connection::from_config(opts, loader.load().await).await
+}
+
+#[tokio::test]
+async fn required_roles_renew_with_the_same_target_and_never_fall_back_to_source() {
+    let http = StaticReplayClient::new(
+        [
+            (200, response("2024-01-01T01:00:00Z")),
+            (
+                200,
+                response("2024-01-01T02:00:00Z").replace("ASSUMED_KEY", "RENEWED_KEY"),
+            ),
+            (
+                403,
+                r#"<ErrorResponse><Error><Code>AccessDenied</Code></Error></ErrorResponse>"#
+                    .to_owned(),
+            ),
+        ]
+        .into_iter()
+        .map(|(status, body)| {
+            ReplayEvent::new(
+                http::Request::new(SdkBody::empty()),
+                http::Response::builder()
+                    .status(status)
+                    .header("content-type", "text/xml")
+                    .body(SdkBody::from(body))
+                    .unwrap(),
+            )
+        })
+        .collect(),
+    );
     let connection = Connection::from_config(
         ConnectionOptions {
             role_arn: Some(ROLE.into()),
@@ -644,18 +421,165 @@ async fn expired_connection_rejects_catalog_calls_before_any_metadata_request() 
     )
     .await
     .unwrap();
-    tokio::time::advance(ROLE_LIFETIME).await;
-    assert!(matches!(
-        connection.table_metadata("types").await,
-        Err(Error::ExpiredRole)
-    ));
-    assert!(matches!(
-        connection.table_page(None).await,
-        Err(Error::ExpiredRole)
-    ));
+    let selected = connection.with_schema("another_schema").unwrap();
+    let provider = selected.config.credentials_provider().unwrap();
     assert_eq!(
-        http.actual_requests().count(),
-        1,
-        "only the original role assumption was permitted"
+        provider
+            .provide_credentials()
+            .await
+            .unwrap()
+            .access_key_id(),
+        "RENEWED_KEY"
     );
+    assert!(provider.provide_credentials().await.is_err());
+    let requests: Vec<_> = http
+        .actual_requests()
+        .map(|request| String::from_utf8_lossy(request.body().bytes().unwrap()).into_owned())
+        .collect();
+    assert_eq!(requests.len(), 3);
+    for request in requests {
+        assert!(
+            request.contains("RoleArn=arn%3Aaws%3Aiam%3A%3A000000000000%3Arole%2Fsynthetic-reader")
+        );
+        assert!(request.contains("RoleSessionName=ckdata-connection"));
+    }
+    assert!(!format!("{connection:?}").contains("synthetic-role-secret"));
+}
+
+#[derive(Clone, Debug)]
+struct Clock(std::sync::Arc<std::sync::atomic::AtomicU64>);
+impl aws_smithy_async::time::TimeSource for Clock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::UNIX_EPOCH
+            + Duration::from_secs(self.0.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn sdk_clients_share_role_credentials_and_renew_after_expiry_without_source_fallback() {
+    use aws_smithy_http_client::test_util::infallible_client_fn;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    };
+    let now = Arc::new(AtomicU64::new(EPOCH));
+    let assumptions = Arc::new(AtomicUsize::new(0));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let deny = Arc::new(AtomicBool::new(false));
+    let (clock, assumed, seen, denied) = (
+        now.clone(),
+        assumptions.clone(),
+        reads.clone(),
+        deny.clone(),
+    );
+    let http = infallible_client_fn(move |request| {
+        let body = String::from_utf8_lossy(request.body().bytes().unwrap());
+        let (status, kind, response) = if body.contains("Action=AssumeRole") {
+            let generation = assumed.fetch_add(1, Ordering::SeqCst) + 1;
+            assert!(
+                body.contains(
+                    "RoleArn=arn%3Aaws%3Aiam%3A%3A000000000000%3Arole%2Fsynthetic-reader"
+                )
+            );
+            if denied.load(Ordering::SeqCst) {
+                (
+                    403,
+                    "text/xml",
+                    "<ErrorResponse><Error><Code>AccessDenied</Code></Error></ErrorResponse>"
+                        .into(),
+                )
+            } else {
+                let expires = if clock.load(Ordering::SeqCst) == EPOCH {
+                    "2024-01-01T01:00:00Z"
+                } else {
+                    "2024-01-01T03:00:00Z"
+                };
+                (
+                    200,
+                    "text/xml",
+                    response(expires).replace("ASSUMED_KEY", &format!("TARGET_{generation}")),
+                )
+            }
+        } else {
+            seen.fetch_add(1, Ordering::SeqCst);
+            assert!(
+                request.headers()["authorization"]
+                    .to_str()
+                    .unwrap()
+                    .contains("TARGET_")
+            );
+            (
+                200,
+                "application/x-amz-json-1.1",
+                r#"{"WorkGroup":{"Name":"synthetic","State":"ENABLED","Configuration":{}}}"#.into(),
+            )
+        };
+        http::Response::builder()
+            .status(status)
+            .header("content-type", kind)
+            .body(response)
+            .unwrap()
+    });
+    let config = config(StaticReplayClient::new(vec![]))
+        .to_builder()
+        .time_source(Clock(now.clone()))
+        .http_client(http)
+        .build();
+    let connection = Connection::from_config(
+        ConnectionOptions {
+            role_arn: Some(ROLE.into()),
+            ..options()
+        },
+        config,
+    )
+    .await
+    .unwrap();
+    connection.workgroup_configuration().await.unwrap();
+    let initial_assumptions = assumptions.load(Ordering::SeqCst);
+    connection.workgroup_configuration().await.unwrap();
+    assert_eq!(
+        assumptions.load(Ordering::SeqCst),
+        initial_assumptions,
+        "clients share the SDK identity cache"
+    );
+    now.store(EPOCH + 3601, Ordering::SeqCst);
+    tokio::time::advance(Duration::from_secs(3601)).await;
+    connection.workgroup_configuration().await.unwrap();
+    assert_eq!(assumptions.load(Ordering::SeqCst), initial_assumptions + 1);
+    deny.store(true, Ordering::SeqCst);
+    now.store(EPOCH + 10801, Ordering::SeqCst);
+    tokio::time::advance(Duration::from_secs(7200)).await;
+    assert!(connection.workgroup_configuration().await.is_err());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        3,
+        "failed renewal sends no request with source credentials"
+    );
+}
+
+#[test]
+fn runtime_role_identity_must_agree_with_the_configured_target_without_guessing_iam_paths() {
+    let role = "arn:aws:iam::111122223333:role/team/Reader";
+    let identity = CallerIdentity {
+        account: "111122223333".into(),
+        arn: "arn:aws:sts::111122223333:assumed-role/Reader/session".into(),
+    };
+    validate_role_identity(&identity, role).unwrap();
+    for arn in [
+        "arn:aws:sts::111122223333:assumed-role/Other/session",
+        "arn:aws:sts::444455556666:assumed-role/Reader/session",
+        "arn:aws-cn:sts::111122223333:assumed-role/Reader/session",
+        "arn:aws:iam::111122223333:user/Reader",
+    ] {
+        assert!(matches!(
+            validate_role_identity(
+                &CallerIdentity {
+                    arn: arn.into(),
+                    ..identity.clone()
+                },
+                role
+            ),
+            Err(Error::RoleIdentityMismatch { .. })
+        ));
+    }
 }

@@ -7,8 +7,12 @@ pub struct ConnectionOptions {
     pub schema: String,
     pub profile: Option<String>,
     pub region: Option<String>,
-    /// An additional role assumed once for this connection, without renewal.
+    /// Direct SSO settings, or overrides of an explicitly selected plain SSO profile.
+    pub sso: Option<crate::auth::SsoOptions>,
+    /// A required additional role, obtained and renewed by the AWS SDK.
     pub role_arn: Option<String>,
+    /// Client result prefix. Enforced workgroup configuration takes precedence.
+    pub output_location: Option<String>,
 }
 
 impl ConnectionOptions {
@@ -18,11 +22,22 @@ impl ConnectionOptions {
             schema: schema.into(),
             profile: None,
             region: None,
+            sso: None,
             role_arn: None,
+            output_location: None,
         }
     }
 
     pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self
+            .output_location
+            .as_deref()
+            .is_some_and(|value| crate::location::S3Location::prefix(value).is_none())
+        {
+            return Err(Error::InvalidSetting(
+                "output location must be an S3 prefix",
+            ));
+        }
         if self.workgroup.is_empty()
             || self.workgroup.len() > 128
             || !self

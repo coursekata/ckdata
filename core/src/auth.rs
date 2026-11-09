@@ -10,23 +10,20 @@ use aws_types::os_shim_internal::{Env, Fs};
 
 use crate::Error;
 
+mod config;
+mod recovery;
+pub use config::SsoOptions;
+pub(crate) use config::{ConfiguredAuth, configure};
+pub use recovery::SsoLogin;
+
 /// The SSO source profile and optional named session to pass to AWS's login tool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsoLoginTarget {
     pub profile: String,
     pub session: Option<String>,
-}
-
-pub(crate) async fn login_target(profile: Option<&str>) -> Option<SsoLoginTarget> {
-    let profiles = aws_config::profile::load(
-        &Fs::real(),
-        &Env::real(),
-        &EnvConfigFiles::default(),
-        profile.map(|name| name.to_owned().into()),
-    )
-    .await
-    .ok()?;
-    profile_login_target(&profiles)
+    /// Nonsecret generated configuration for direct SSO. The host passes it only
+    /// to the login subprocess; AWS owns token caching and refresh.
+    pub config: Option<String>,
 }
 
 fn profile_login_target(profiles: &ProfileSet) -> Option<SsoLoginTarget> {
@@ -73,24 +70,54 @@ fn profile_login_target(profiles: &ProfileSet) -> Option<SsoLoginTarget> {
         return Some(SsoLoginTarget {
             profile: name.to_owned(),
             session: session.map(str::to_owned),
+            config: None,
         });
     }
 }
 
 pub(crate) fn credential_error(error: CredentialsError, target: Option<SsoLoginTarget>) -> Error {
+    if is_sso_failure(&error)
+        && let Some(target) = target
+    {
+        return Error::SsoLoginRequired { target };
+    }
+    use aws_sdk_sts::{error::ProvideErrorMetadata, operation::assume_role::AssumeRoleError};
+    let mut source: Option<&(dyn StdError + 'static)> = Some(&error);
+    while let Some(cause) = source {
+        if let Some(sdk) = cause.downcast_ref::<aws_sdk_sts::error::SdkError<AssumeRoleError>>() {
+            return Error::AssumeRole {
+                code: sdk
+                    .as_service_error()
+                    .and_then(|error| error.code())
+                    .unwrap_or("request failed")
+                    .to_owned(),
+                message: crate::error::service_message(sdk.as_service_error()),
+            };
+        }
+        source = cause.source();
+    }
+    Error::CredentialsUnavailable
+}
+
+fn is_sso_failure(error: &CredentialsError) -> bool {
     // Inspect typed SDK causes, never authentication error text or token files.
     let mut token_error = false;
     let mut missing_file = false;
     let mut unauthorized = false;
-    let mut source: Option<&(dyn StdError + 'static)> = Some(&error);
+    let mut source: Option<&(dyn StdError + 'static)> = Some(error);
     while let Some(cause) = source {
         if let Some(io) = cause.downcast_ref::<std::io::Error>() {
             match io.kind() {
                 std::io::ErrorKind::NotFound => missing_file = true,
-                _ => return Error::CredentialsUnavailable,
+                _ => return false,
             }
         }
-        token_error |= cause.is::<TokenError>();
+        if let Some(token) = cause.downcast_ref::<TokenError>() {
+            match token {
+                TokenError::ProviderError(_) => token_error = true,
+                _ => return false,
+            }
+        }
         if let Some(sdk) =
             cause.downcast_ref::<aws_sdk_sso::error::SdkError<GetRoleCredentialsError>>()
         {
@@ -106,13 +133,7 @@ pub(crate) fn credential_error(error: CredentialsError, target: Option<SsoLoginT
             cause.cause().and_then(StdError::source)
         });
     }
-    if (token_error || missing_file || unauthorized)
-        && let Some(target) = target
-    {
-        Error::SsoLoginRequired { target }
-    } else {
-        Error::CredentialsUnavailable
-    }
+    token_error || missing_file || unauthorized
 }
 
 #[cfg(test)]

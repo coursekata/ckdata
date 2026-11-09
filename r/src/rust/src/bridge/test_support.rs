@@ -93,7 +93,7 @@ fn native_probe_job(milliseconds: f64) -> Result<Robj> {
     }
     let cancellation = QueryCancellation::new();
     let cancel = cancellation.clone();
-    spawn(cancellation, async move {
+    spawn(cancellation, false, async move {
         tokio::select! {
             _ = cancel.cancelled() => Err(NativeFailure::message("synthetic query cancelled")),
             _ = tokio::time::sleep(Duration::from_secs_f64(milliseconds / 1000.0)) => {

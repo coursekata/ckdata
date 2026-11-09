@@ -1,11 +1,11 @@
 Package: ckdata
-Title: Query the CourseKata Data Lake
+Title: Query Amazon Athena
 Version: 0.0.1
 Authors@R: c(
     person("Adam", "Blake", email = "adam@ablake.dev", role = c("aut", "cre")),
     person("CourseKata", role = "cph")
   )
-Description: A read-only DBI and dbplyr interface to the CourseKata data lake.
+Description: A read-only DBI and dbplyr interface to Amazon Athena.
     A shared Rust core executes Athena queries through Parquet and returns
     Arrow results, including schemas for empty results. Researchers can use
     lazy dplyr queries, SQL, temporary saved results and reproducible snapshots.
@@ -33,6 +33,7 @@ Imports:
     lubridate,
     methods,
     nanoarrow,
+    processx,
     purrr,
     rlang (>= 1.2.0),
     stringr,
@@ -43,3 +44,9 @@ Suggests:
     RSQLite,
     testthat (>= 3.1.7)
 Config/testthat/edition: 3
+Config/Needs/development:
+    devtools,
+    lintr,
+    rcmdcheck,
+    rextendr,
+    roxygen2

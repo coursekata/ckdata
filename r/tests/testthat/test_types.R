@@ -1,11 +1,16 @@
 test_that("Arrow conversion retains nested int64 and stable empty column types", {
   table <- arrow::Table$create(
     big = bit64::as.integer64(c("9007199254740993", NA)),
-    decimal = arrow::Array$create(c("12345678901234567890.1234", NA))$cast(arrow::decimal128(38, 4)),
-    values = arrow::Array$create(list(bit64::as.integer64("9007199254740993"), NULL),
+    decimal = arrow::Array$create(c(
+      "12345678901234567890.1234",
+      NA
+    ))$cast(arrow::decimal128(38, 4)),
+    values = arrow::Array$create(
+      list(bit64::as.integer64("9007199254740993"), NULL),
       type = arrow::list_of(arrow::int64())
     ),
-    record = arrow::Array$create(data.frame(id = bit64::as.integer64(c("9007199254740993", NA))),
+    record = arrow::Array$create(
+      data.frame(id = bit64::as.integer64(c("9007199254740993", NA))),
       type = arrow::struct(id = arrow::int64())
     ),
     date = as.Date(c("2026-11-03", NA)),
@@ -44,8 +49,16 @@ test_that("saved result refresh and context isolation use the actual DBI path", 
 })
 
 test_that("R conversion maps integer minima to its missing sentinels", {
-  integer <- arrow::Array$create(c("-2147483648", "2147483647", NA))$cast(arrow::int32())
-  big <- arrow::Array$create(c("-9223372036854775808", "9223372036854775807", NA))$cast(arrow::int64())
+  integer <- arrow::Array$create(c(
+    "-2147483648",
+    "2147483647",
+    NA
+  ))$cast(arrow::int32())
+  big <- arrow::Array$create(c(
+    "-9223372036854775808",
+    "9223372036854775807",
+    NA
+  ))$cast(arrow::int64())
   frame <- table_frame(arrow::Table$create(integer = integer, big = big))
   expect_identical(frame$integer, c(NA_integer_, 2147483647L, NA_integer_))
   expect_identical(as.character(frame$big), c(NA, "9223372036854775807", NA))

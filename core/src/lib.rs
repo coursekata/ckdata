@@ -9,12 +9,12 @@ mod query;
 mod result;
 mod settings;
 
-pub use auth::SsoLoginTarget;
-pub use connection::{CallerIdentity, Connection, SessionStatus};
+pub use auth::{SsoLogin, SsoLoginTarget, SsoOptions};
+pub use connection::{CallerIdentity, Connection};
 pub use error::Error;
 pub use metadata::{ColumnMetadata, TableMetadata, TablePage};
 pub use query::{CancellationStatus, QueryExecution, QueryInterruption, QueryOptions};
-pub use result::{QueryResult, QueryWarning, ResultError};
+pub use result::{QueryResult, ResultError};
 pub use settings::ConnectionOptions;
 pub use tokio_util::sync::CancellationToken as QueryCancellation;
 

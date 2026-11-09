@@ -13,6 +13,6 @@ Invisibly, \code{TRUE}.
 The next call to \code{\link[=lake_tbl]{lake_tbl()}} or \code{\link[=lake_query]{lake_query()}} opens a new connection using
 the current settings. Saved lazy queries keep their original connection;
 rebuild them from a fresh \code{lake_tbl()} before collecting results.
-Use this explicitly after an assumed-role session expires or before changing
+Use this explicitly before changing
 connection settings. Calling it before a session exists does not connect.
 }

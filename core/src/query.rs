@@ -11,13 +11,16 @@ use aws_sdk_athena::types::{
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use uuid::Uuid;
 
-use crate::{Connection, Error, QueryCancellation, SessionStatus};
+use crate::{Connection, Error, QueryCancellation};
+
+mod submission;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Limits apply to the query lifecycle. A stop request gets up to five additional
-/// seconds. Each SDK call is capped at ten seconds, including submission.
+/// seconds. Submission has a ten-second network bound; interactive sign-in may
+/// take longer, within the query deadline, and can be cancelled before sending.
 #[derive(Clone, Debug)]
 pub struct QueryOptions {
     pub timeout: Duration,
@@ -57,8 +60,6 @@ pub enum QueryInterruption {
     Cancelled,
     #[error("deadline exceeded")]
     TimedOut,
-    #[error("assumed-role session expired")]
-    SessionExpired,
     #[error("AWS {operation} failed ({code}){detail}", detail = crate::error::message_suffix(.message))]
     RequestFailed {
         operation: &'static str,
@@ -97,9 +98,9 @@ impl Connection {
     /// Output goes under a fresh prefix in the workgroup's configured result
     /// location. No bucket listing or deletion is performed.
     ///
-    /// Keep awaiting this future after signalling cancellation. During submission
-    /// the client first waits for the query ID (at most ten seconds), then requests
-    /// a stop. Dropping the future cannot guarantee remote cancellation.
+    /// Keep awaiting this future after signalling cancellation. Once submission
+    /// reaches the network, the client waits for its query ID (at most ten seconds),
+    /// then requests a stop. Dropping the future cannot guarantee remote cancellation.
     pub async fn execute_unload(
         &self,
         sql: &str,
@@ -134,7 +135,7 @@ impl Connection {
             aws_sdk_athena::config::Builder::from(self.aws_config())
                 .timeout_config(
                     TimeoutConfig::builder()
-                        .operation_timeout(REQUEST_TIMEOUT)
+                        .operation_timeout(guard.request_timeout(REQUEST_TIMEOUT))
                         .build(),
                 )
                 .build(),
@@ -159,14 +160,25 @@ impl Connection {
             .await
             .map_err(before_submission)?;
         let request_token = Uuid::new_v4().to_string();
-        let destination = QueryDestination::new(workgroup.work_group(), &request_token)?;
+        let destination = QueryDestination::new(
+            workgroup.work_group(),
+            self.options().output_location.as_deref(),
+            &request_token,
+        )?;
         let unload = format!(
             "UNLOAD (\n{query}\n) TO '{}' WITH (format = 'PARQUET', compression = 'SNAPPY')",
             destination.data_prefix.replace('\'', "''")
         );
         guard.check().map_err(before_submission)?;
         let query_id = self
-            .submit_unload(&client, unload, options, &destination, &request_token)
+            .submit_unload(
+                &client,
+                unload,
+                options,
+                &destination,
+                &request_token,
+                &guard,
+            )
             .await?;
         let result = self
             .poll_query(&client, &query_id, &destination, &guard, options)
@@ -197,10 +209,9 @@ impl Connection {
         options: &QueryOptions,
         destination: &QueryDestination,
         request_token: &str,
+        guard: &RequestGuard<'_>,
     ) -> Result<String, Error> {
-        // Do not race cancellation against StartQueryExecution: its response is
-        // needed to stop a query accepted just before the interruption. The SDK
-        // bounds this call and retries with the same idempotency token.
+        let submission = submission::Submission::default();
         let started = client
             .start_query_execution()
             .client_request_token(request_token)
@@ -217,18 +228,31 @@ impl Connection {
                     .build(),
             )
             .result_configuration(destination.configuration.clone())
-            .send()
-            .await
-            .map_err(|error| Error::QuerySubmission {
-                outcome_unknown: error.as_service_error().is_none(),
-                code: error
-                    .as_service_error()
-                    .and_then(|error| error.code())
-                    .unwrap_or("request failed; submission outcome unknown")
-                    .to_owned(),
-                message: crate::error::service_message(error.as_service_error()),
-                request_token: request_token.to_owned(),
-            })?;
+            .customize()
+            .interceptor(submission.clone())
+            .send();
+        let started = submission
+            .wait(
+                async {
+                    started.await.map_err(|error| Error::QuerySubmission {
+                        outcome_unknown: submission.sent() && error.as_service_error().is_none(),
+                        code: error
+                            .as_service_error()
+                            .and_then(|error| error.code())
+                            .unwrap_or(if submission.sent() {
+                                "request failed; submission outcome unknown"
+                            } else {
+                                "request failed before submission"
+                            })
+                            .to_owned(),
+                        message: crate::error::service_message(error.as_service_error()),
+                        request_token: request_token.to_owned(),
+                    })
+                },
+                guard,
+                request_token,
+            )
+            .await?;
         started
             .query_execution_id()
             .filter(|id| !id.is_empty())
@@ -307,9 +331,6 @@ impl Connection {
     }
 
     async fn stop_query(&self, client: &Client, query_id: &str) -> CancellationStatus {
-        if self.session_status().is_err() {
-            return CancellationStatus::Unconfirmed;
-        }
         match timeout(
             STOP_TIMEOUT,
             client
@@ -332,18 +353,31 @@ struct QueryDestination {
 }
 
 impl QueryDestination {
-    fn new(workgroup: Option<&WorkGroup>, request_token: &str) -> Result<Self, Error> {
+    fn new(
+        workgroup: Option<&WorkGroup>,
+        output_location: Option<&str>,
+        request_token: &str,
+    ) -> Result<Self, Error> {
         let workgroup = workgroup.ok_or(Error::InvalidServiceResponse("GetWorkGroup"))?;
         if workgroup.state() != Some(&WorkGroupState::Enabled) {
             return Err(Error::InvalidSetting("workgroup must be enabled"));
         }
-        let configuration = workgroup
+        let settings = workgroup
             .configuration()
-            .and_then(|config| config.result_configuration())
             .ok_or(Error::InvalidSetting("workgroup result configuration"))?;
+        let output_location =
+            output_location.filter(|_| settings.enforce_work_group_configuration() != Some(true));
+        let mut configuration = match settings.result_configuration() {
+            Some(configuration) => configuration.clone(),
+            None if output_location.is_some() => ResultConfiguration::builder().build(),
+            None => return Err(Error::InvalidSetting("workgroup result configuration")),
+        };
+        if let Some(location) = output_location {
+            configuration.output_location = Some(location.to_owned());
+        }
         let output_prefix = configuration
             .output_location()
-            .and_then(s3_prefix)
+            .and_then(crate::location::S3Location::prefix)
             .ok_or(Error::InvalidSetting("workgroup output location"))?;
         if let Some(encryption) = configuration.encryption_configuration() {
             if !matches!(
@@ -367,7 +401,7 @@ impl QueryDestination {
         Ok(Self {
             data_prefix: format!("{output_prefix}ckdata/{request_token}/"),
             output_prefix,
-            configuration: configuration.clone(),
+            configuration,
         })
     }
 
@@ -420,6 +454,11 @@ pub(crate) struct RequestGuard<'a> {
 }
 
 impl RequestGuard<'_> {
+    pub(crate) fn request_timeout(&self, normal: Duration) -> Duration {
+        self.connection
+            .request_timeout(normal)
+            .min(self.deadline.saturating_duration_since(Instant::now()))
+    }
     pub(crate) fn check(&self) -> Result<(), QueryInterruption> {
         if self.cancellation.is_cancelled() {
             return Err(QueryInterruption::Cancelled);
@@ -427,10 +466,7 @@ impl RequestGuard<'_> {
         if Instant::now() >= self.deadline {
             return Err(QueryInterruption::TimedOut);
         }
-        self.connection
-            .session_status()
-            .map(|_| ())
-            .map_err(|_| QueryInterruption::SessionExpired)
+        Ok(())
     }
 
     pub(crate) async fn run<T>(
@@ -438,20 +474,10 @@ impl RequestGuard<'_> {
         request: impl Future<Output = Result<T, QueryInterruption>>,
     ) -> Result<T, QueryInterruption> {
         self.check()?;
-        let role_deadline = match self
-            .connection
-            .session_status()
-            .map_err(|_| QueryInterruption::SessionExpired)?
-        {
-            SessionStatus::Standard => None,
-            SessionStatus::Assumed { remaining, .. }
-            | SessionStatus::Expiring { remaining, .. } => Some(Instant::now() + remaining),
-        };
         tokio::select! {
             biased;
             _ = self.cancellation.cancelled() => Err(QueryInterruption::Cancelled),
             _ = sleep_until(self.deadline) => Err(QueryInterruption::TimedOut),
-            _ = async { match role_deadline { Some(deadline) => sleep_until(deadline).await, None => std::future::pending().await } } => Err(QueryInterruption::SessionExpired),
             result = request => result,
         }
     }
@@ -493,16 +519,6 @@ pub(crate) fn query_text(sql: &str) -> Result<&str, Error> {
 
 fn s3_location(location: &str) -> bool {
     crate::location::S3Location::parse(location).is_some()
-}
-
-fn s3_prefix(location: &str) -> Option<String> {
-    s3_location(location).then(|| {
-        if location.ends_with('/') {
-            location.to_owned()
-        } else {
-            format!("{location}/")
-        }
-    })
 }
 
 #[cfg(test)]

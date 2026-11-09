@@ -7,24 +7,25 @@ local_native_connection <- function(env = rlang::caller_env()) {
   calls$schema_only <- logical()
   calls$metadata <- 0L
   calls$metadata_args <- list()
-  calls$session_error <- ""
   calls$account <- "000000000000"
   calls$connections <- list()
   info <- function(object) {
     list(
-      open = TRUE, account = calls$account,
-      arn = "arn:aws:iam::000000000000:role/synthetic", region = "us-west-2",
-      workgroup = "synthetic", schema = "fixture", session_error = calls$session_error,
-      expiring = FALSE
+      open = TRUE,
+      account = calls$account,
+      arn = "arn:aws:iam::000000000000:role/synthetic",
+      region = "us-west-2",
+      workgroup = "synthetic",
+      schema = "fixture"
     )
   }
   original_wait <- native_wait
   testthat::local_mocked_bindings(
-    native_connect = function(workgroup, schema, profile, region, role_arn) {
-      calls$connections <- c(calls$connections, list(list(
-        workgroup = workgroup,
-        schema = schema, profile = profile, region = region, role_arn = role_arn
-      )))
+    native_connect = function(settings, login_allowed = FALSE) {
+      calls$connections <- c(
+        calls$connections,
+        list(c(settings, list(login = login_allowed)))
+      )
       structure(list(value = NULL), class = "metadata_fixture")
     },
     native_connection_info = info,
@@ -32,12 +33,27 @@ local_native_connection <- function(env = rlang::caller_env()) {
       calls$queries <- c(calls$queries, sql)
       calls$parameters <- c(calls$parameters, list(parameters))
       calls$schema_only <- c(calls$schema_only, schema_only)
-      if (schema_only) structure(list(value = list(handle = native_probe_result(TRUE), query_id = "synthetic-empty", warnings = character())), class = "metadata_fixture") else native_probe_job(0)
+      if (schema_only) {
+        structure(
+          list(
+            value = list(
+              handle = native_probe_result(TRUE),
+              query_id = "synthetic-empty"
+            )
+          ),
+          class = "metadata_fixture"
+        )
+      } else {
+        native_probe_job(0)
+      }
     },
     native_disconnect = function(object) invisible(NULL),
     native_metadata = function(object, schema, table) {
       calls$metadata <- calls$metadata + 1L
-      calls$metadata_args <- c(calls$metadata_args, list(list(schema = schema, table = table)))
+      calls$metadata_args <- c(
+        calls$metadata_args,
+        list(list(schema = schema, table = table))
+      )
       value <- if (rlang::is_null(table)) {
         "types"
       } else {
@@ -48,12 +64,20 @@ local_native_connection <- function(env = rlang::caller_env()) {
     native_wait = function(job) {
       if (inherits(job, "metadata_fixture")) job$value else original_wait(job)
     },
-    .package = "ckdata", .env = env
+    .package = "ckdata",
+    .env = env
   )
-  con <- DBI::dbConnect(ckdata(), workgroup = "synthetic", schema = "fixture", role_arn = NULL)
+  con <- DBI::dbConnect(
+    ckdata(),
+    workgroup = "synthetic",
+    schema = "fixture",
+    role_arn = NULL
+  )
   withr::defer(
     {
-      if (rlang::is_true(con@state$open)) suppressWarnings(DBI::dbDisconnect(con))
+      if (rlang::is_true(con@state$open)) {
+        suppressWarnings(DBI::dbDisconnect(con))
+      }
     },
     envir = env
   )
@@ -76,7 +100,8 @@ local_native_cancellation <- function(env = rlang::caller_env()) {
         rlang::cnd_signal(cnd)
       })
     },
-    .package = "ckdata", .env = env
+    .package = "ckdata",
+    .env = env
   )
   calls
 }

@@ -17,8 +17,10 @@ pub enum Error {
     },
     #[error("STS returned incomplete or expired role credentials")]
     InvalidRoleCredentials,
-    #[error("the assumed-role session expired; create a new connection")]
-    ExpiredRole,
+    #[error(
+        "AWS identity {actual} does not match required role {expected}; no data access permitted"
+    )]
+    RoleIdentityMismatch { expected: String, actual: String },
     #[error("AWS {operation} failed ({code}){detail}", detail = message_suffix(.message))]
     Service {
         operation: &'static str,

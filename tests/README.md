@@ -10,13 +10,16 @@ Python package's test suite.
 Run these commands from the repository root:
 
 ```sh
-cargo test --workspace --all-targets --locked --exclude ckdata-py
-Rscript -e 'Sys.setenv(R_INCLUDE_DIR = R.home("include")); quit(status = system2("cargo", c("test", "--manifest-path", "r/src/rust/Cargo.toml", "--all-targets", "--locked")))'
-Rscript -e 'devtools::test("r")'
-Rscript -e 'devtools::check("r", args = "--no-manual")'
-uv run --locked pytest
-uv run --locked --group bindings --all-packages pytest python/tests
+just setup
+just check
+just build --check
 ```
+
+`check` aggregates formatting checks, static analysis and offline tests. To run
+only tests, use `just test`, or select `--target rust`, `--target r`,
+`--target python` or `--target tooling`. The recipes use Cargo, testthat and
+pytest directly. `build --check` validates the built R source archive and tests
+the installed Python wheel in a temporary environment; it publishes nothing.
 
 CI builds the actual R source tarball, then runs `R CMD check` against it on Linux,
 macOS and Windows. The release workflow installs R-universe binaries without Rust
@@ -24,7 +27,8 @@ and runs testthat against the installed package. There is no separate R build
 simulator or tarball checker.
 
 The R crate has its own workspace so the source package builds independently of
-this checkout. Its native tests therefore need the separate Cargo command above.
+this checkout. The R test recipe runs its native tests separately from the root
+Cargo workspace.
 `uv.lock` describes one Python development environment; the optional `bindings`
 group supplies maturin, PyArrow and the frame libraries. Python query behavior
 will be tested under `python/tests/` as that interface is implemented.
@@ -32,9 +36,10 @@ will be tested under `python/tests/` as that interface is implemented.
 ## R tests
 
 `r/tests/testthat/` covers DBI cursor lifecycle and metadata, quoting and binding,
-dbplyr translations, column policy, saved results, Arrow/R conversions, interrupts
-and fixed-role expiry. Ordinary tests use invented native Arrow fixtures and
-SQLite tables. Selected DBItest cases exercise the read-side contract; writes and
+dbplyr translations, column policy, saved results, Arrow/R conversions,
+interrupts, authentication precedence, bounded SSO sign-in and credential
+renewal. Ordinary tests use invented native Arrow fixtures and SQLite tables.
+Selected DBItest cases exercise the read-side contract; writes and
 transactions are outside this backend's scope.
 
 Private native `test_support` modules construct the offline binding fixtures. R's
@@ -98,8 +103,7 @@ cargo run -p ckdata --example query_acceptance -- \
 The contract is validated before authentication. The example assumes the restricted
 test roles, checks their identities and workgroup settings, and tests the real
 reader without printing rows or deleting outputs. No arbitrary SQL option exists.
-`--wait-for-expiry` enables the separately scheduled real one-hour expiry check;
-ordinary Cargo tests use a virtual clock.
+Role renewal is covered offline with a virtual clock and synthetic AWS responses.
 
 The former independent Python AWS probe has been retired. Live package tests use
 the implemented reader instead of maintaining a second query/manifest decoder.

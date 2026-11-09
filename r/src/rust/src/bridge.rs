@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use arrow_array::{RecordBatch, RecordBatchIterator, RecordBatchReader};
 use arrow_schema::SchemaRef;
-use ckdata::{Connection, ConnectionOptions, QueryCancellation, QueryOptions, SessionStatus};
+use ckdata::{Connection, ConnectionOptions, QueryCancellation, QueryOptions, SsoLogin};
 use extendr_api::Result;
 use extendr_api::prelude::*;
 
@@ -19,6 +19,8 @@ type NativeValue = std::result::Result<Completion, NativeFailure>;
 struct NativeFailure {
     message: String,
     sso_login: Option<ckdata::SsoLoginTarget>,
+    credentials_unavailable: bool,
+    login_disabled: bool,
     cancellation: Option<ckdata::CancellationStatus>,
     remote_may_be_running: bool,
 }
@@ -28,6 +30,8 @@ impl NativeFailure {
         Self {
             message: message.to_string(),
             sso_login: None,
+            credentials_unavailable: false,
+            login_disabled: false,
             cancellation: None,
             remote_may_be_running: false,
         }
@@ -41,9 +45,18 @@ impl NativeFailure {
         });
         list!(
             message = self.message,
+            credentials_unavailable = self.credentials_unavailable,
+            login_disabled = self.login_disabled,
             sso_login = self.sso_login.map_or_else(
                 || ().into_robj(),
-                |target| { list!(profile = target.profile, session = target.session).into_robj() }
+                |target| {
+                    list!(
+                        profile = target.profile,
+                        session = target.session,
+                        config = target.config
+                    )
+                    .into_robj()
+                }
             ),
             cancellation = cancellation.map_or_else(|| ().into_robj(), |value| value.into_robj()),
             remote_may_be_running = self.remote_may_be_running
@@ -59,6 +72,8 @@ impl From<ckdata::Error> for NativeFailure {
                 _ => None,
             },
             message: error.to_string(),
+            credentials_unavailable: matches!(error, ckdata::Error::CredentialsUnavailable),
+            login_disabled: false,
             cancellation: error.cancellation_status(),
             remote_may_be_running: error.remote_query_may_be_running(),
         }
@@ -70,12 +85,14 @@ struct NativeConnection {
     options: ConnectionOptions,
     region: String,
     identity: ckdata::CallerIdentity,
+    login_allowed: bool,
 }
 
 struct NativeJob {
     value: Arc<Mutex<Option<NativeValue>>>,
     cancellation: Arc<QueryCancellation>,
     task: tokio::task::JoinHandle<()>,
+    login: SsoLogin,
 }
 
 impl Drop for NativeJob {
@@ -83,6 +100,7 @@ impl Drop for NativeJob {
         // The task remains scheduled so the core can obtain the query ID and
         // request remote cancellation even after R releases its job handle.
         self.cancellation.cancel();
+        self.login.complete(false);
     }
 }
 
@@ -168,8 +186,11 @@ fn runtime_state() -> Result<&'static Mutex<Option<RuntimeState>>> {
 
 fn spawn(
     cancellation: QueryCancellation,
+    login_allowed: bool,
     future: impl Future<Output = NativeValue> + Send + 'static,
 ) -> Result<Robj> {
+    let login = SsoLogin::new(login_allowed);
+    let interaction = login.clone();
     let value = Arc::new(Mutex::new(None));
     let output = value.clone();
     let cancellation = Arc::new(cancellation);
@@ -189,7 +210,7 @@ fn spawn(
         let state = state.as_mut().expect("runtime initialized above");
         state.jobs.retain(|(_, task)| !task.is_finished());
         let task = state.runtime.spawn(async move {
-            let result = future.await;
+            let result = interaction.scope(future).await;
             if let Ok(mut slot) = output.lock() {
                 *slot = Some(result);
             }
@@ -203,6 +224,7 @@ fn spawn(
         value,
         cancellation,
         task,
+        login,
     })
     .into())
 }
@@ -213,34 +235,65 @@ fn connection(object: Robj) -> Result<Connection> {
         .connection
         .as_ref()
         .ok_or_else(|| failure("connection is closed"))?;
-    connection.session_status().map_err(failure)?;
     Ok(connection.clone())
+}
+
+fn string_setting(settings: &List, key: &str) -> Result<Option<String>> {
+    let value = settings
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, value)| value);
+    match value {
+        None => Ok(None),
+        Some(value) if value.is_null() => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_owned()))
+            .ok_or_else(|| failure(format!("{key} must be a single string or NULL"))),
+    }
+}
+
+fn connection_options(settings: &List) -> Result<ConnectionOptions> {
+    let required =
+        |key| string_setting(settings, key)?.ok_or_else(|| failure(format!("missing {key}")));
+    let mut options = ConnectionOptions::new(required("workgroup")?, required("schema")?);
+    options.profile = string_setting(settings, "profile")?;
+    options.region = string_setting(settings, "region")?;
+    options.role_arn = string_setting(settings, "role_arn")?;
+    options.output_location = string_setting(settings, "output_location")?;
+    if let Some((_, sso)) = settings.iter().find(|(name, _)| *name == "sso") {
+        let sso = List::try_from(sso)?;
+        if !sso.is_empty() {
+            options.sso = Some(ckdata::SsoOptions {
+                start_url: string_setting(&sso, "start_url")?,
+                region: string_setting(&sso, "region")?,
+                account_id: string_setting(&sso, "account_id")?,
+                role_name: string_setting(&sso, "role_name")?,
+                session: string_setting(&sso, "session")?,
+                registration_scopes: string_setting(&sso, "registration_scopes")?,
+                fallback_profile: string_setting(&sso, "fallback_profile")?,
+            });
+        }
+    }
+    Ok(options)
 }
 
 /// @noRd
 #[extendr]
-fn native_connect(
-    workgroup: String,
-    schema: String,
-    profile: Option<String>,
-    region: Option<String>,
-    role_arn: Option<String>,
-) -> Result<Robj> {
-    let mut options = ConnectionOptions::new(workgroup, schema);
-    options.profile = profile;
-    options.region = region;
-    options.role_arn = role_arn;
+fn native_connect(settings: List, login_allowed: bool) -> Result<Robj> {
+    let options = connection_options(&settings)?;
     let cancellation = QueryCancellation::new();
     let cancel = cancellation.clone();
-    spawn(cancellation, async move {
+    spawn(cancellation, login_allowed, async move {
         tokio::select! {
             _ = cancel.cancelled() => Err(NativeFailure::message("connection cancelled")),
             value = async {
                 let connection = Connection::connect(options).await.map_err(NativeFailure::from)?;
                 let identity = connection.caller_identity().await.map_err(NativeFailure::from)?;
+                connection.workgroup_configuration().await.map_err(NativeFailure::from)?;
                 let options = connection.options().clone();
                 let region = connection.region().to_owned();
-                Ok(Completion::Connected(Box::new(NativeConnection { connection: Some(connection), options, region, identity })))
+                Ok(Completion::Connected(Box::new(NativeConnection { connection: Some(connection), options, region, identity, login_allowed })))
             } => value
         }
     })
@@ -256,7 +309,33 @@ fn native_ready(object: Robj) -> Result<bool> {
 /// @noRd
 #[extendr]
 fn native_cancel(object: Robj) -> Result<()> {
-    handle::<NativeJob>(object)?.cancellation.cancel();
+    let job = handle::<NativeJob>(object)?;
+    job.cancellation.cancel();
+    job.login.complete(false);
+    Ok(())
+}
+
+/// @noRd
+#[extendr]
+fn native_login_target(object: Robj) -> Result<Robj> {
+    let target = handle::<NativeJob>(object)?.login.pending();
+    Ok(target.map_or_else(
+        || ().into_robj(),
+        |target| {
+            list!(
+                profile = target.profile,
+                session = target.session,
+                config = target.config
+            )
+            .into_robj()
+        },
+    ))
+}
+
+/// @noRd
+#[extendr]
+fn native_login_complete(object: Robj, success: bool) -> Result<()> {
+    handle::<NativeJob>(object)?.login.complete(success);
     Ok(())
 }
 
@@ -287,7 +366,11 @@ fn native_job_value(object: Robj) -> Result<List> {
         .ok_or_else(|| failure("job is not ready or was already consumed"))?;
     match value {
         Ok(value) => Ok(list!(success = true, value = completion_value(value)?)),
-        Err(error) => Ok(list!(success = false, error = error.into_list())),
+        Err(mut error) => {
+            error.sso_login = error.sso_login.or_else(|| job.login.required());
+            error.login_disabled = error.sso_login.is_some() && !job.login.allowed();
+            Ok(list!(success = false, error = error.into_list()))
+        }
     }
 }
 
@@ -296,33 +379,15 @@ fn completion_value(value: Completion) -> Result<Robj> {
         Completion::Connected(value) => ExternalPtr::new(*value).into(),
         Completion::Query(value) => {
             let query_id = value.query_id().to_owned();
-            let warnings: Vec<_> = value
-                .warnings()
-                .iter()
-                .map(|warning| match warning {
-                    ckdata::QueryWarning::SessionExpiring { remaining } => format!(
-                        "assumed-role session expires in {} seconds; it will not renew",
-                        remaining.as_secs()
-                    ),
-                })
-                .collect();
             let result = NativeResult::from_reader(value.into_reader()).map_err(failure)?;
-            list!(
-                handle = ExternalPtr::new(result),
-                query_id = query_id,
-                warnings = warnings
-            )
-            .into()
+            list!(handle = ExternalPtr::new(result), query_id = query_id).into()
         }
         Completion::Table(value) => columns(value).into(),
         Completion::Tables(value) => value.into(),
         Completion::Workgroup(value) => value.into_list().into(),
-        Completion::Probe(value) => list!(
-            handle = ExternalPtr::new(value),
-            query_id = "synthetic",
-            warnings = Vec::<String>::new()
-        )
-        .into(),
+        Completion::Probe(value) => {
+            list!(handle = ExternalPtr::new(value), query_id = "synthetic").into()
+        }
     })
 }
 
@@ -330,19 +395,13 @@ fn completion_value(value: Completion) -> Result<Robj> {
 #[extendr]
 fn native_connection_info(object: Robj) -> Result<List> {
     let native = handle::<NativeConnection>(object)?;
-    let status = native.connection.as_ref().map(Connection::session_status);
     Ok(list!(
         open = native.connection.is_some(),
         account = native.identity.account.clone(),
         arn = native.identity.arn.clone(),
         region = native.region.clone(),
         workgroup = native.options.workgroup.clone(),
-        schema = native.options.schema.clone(),
-        session_error = match &status {
-            Some(Err(error)) => error.to_string(),
-            _ => String::new(),
-        },
-        expiring = matches!(status, Some(Ok(SessionStatus::Expiring { .. })))
+        schema = native.options.schema.clone()
     ))
 }
 
@@ -390,6 +449,7 @@ fn native_query(
     parameters: Vec<String>,
     schema_only: bool,
 ) -> Result<Robj> {
+    let login_allowed = handle::<NativeConnection>(object.clone())?.login_allowed;
     let connection = connection(object)?;
     if !timeout.is_finite() || timeout <= 0.0 || timeout > 86400.0 {
         return Err(failure("timeout must be between zero and 86400 seconds"));
@@ -401,7 +461,7 @@ fn native_query(
     };
     let cancellation = QueryCancellation::new();
     let cancel = cancellation.clone();
-    spawn(cancellation, async move {
+    spawn(cancellation, login_allowed, async move {
         let value = if schema_only {
             connection.query_empty(&sql, &options, &cancel).await
         } else {
@@ -414,10 +474,11 @@ fn native_query(
 /// @noRd
 #[extendr]
 fn native_metadata(object: Robj, schema: String, table: Option<String>) -> Result<Robj> {
+    let login_allowed = handle::<NativeConnection>(object.clone())?.login_allowed;
     let connection = connection(object)?.with_schema(&schema).map_err(failure)?;
     let cancellation = QueryCancellation::new();
     let cancel = cancellation.clone();
-    spawn(cancellation, async move {
+    spawn(cancellation, login_allowed, async move {
         tokio::select! {
             _ = cancel.cancelled() => Err(NativeFailure::message("metadata request cancelled")),
             value = async {
@@ -441,10 +502,11 @@ fn native_metadata(object: Robj, schema: String, table: Option<String>) -> Resul
 /// @noRd
 #[extendr]
 fn native_workgroup(object: Robj) -> Result<Robj> {
+    let login_allowed = handle::<NativeConnection>(object.clone())?.login_allowed;
     let connection = connection(object)?;
     let cancellation = QueryCancellation::new();
     let cancel = cancellation.clone();
-    spawn(cancellation, async move {
+    spawn(cancellation, login_allowed, async move {
         tokio::select! {
             _ = cancel.cancelled() => Err(NativeFailure::message("workgroup request cancelled")),
             value = connection.workgroup_configuration() => {
@@ -586,6 +648,8 @@ extendr_module! {
     fn native_connect;
     fn native_ready;
     fn native_cancel;
+    fn native_login_target;
+    fn native_login_complete;
     fn native_job_value;
     fn native_connection_info;
     fn native_disconnect;
@@ -604,6 +668,24 @@ extendr_module! {
 mod tests {
     use super::*;
     use arrow_array::{Array, Int64Array};
+
+    #[test]
+    fn native_authentication_failures_distinguish_login_from_unavailable_credentials() {
+        let unavailable = NativeFailure::from(ckdata::Error::CredentialsUnavailable);
+        assert!(unavailable.credentials_unavailable);
+        assert!(unavailable.sso_login.is_none());
+
+        let target = ckdata::SsoLoginTarget {
+            profile: "synthetic".into(),
+            session: Some("fixture".into()),
+            config: None,
+        };
+        let login = NativeFailure::from(ckdata::Error::SsoLoginRequired {
+            target: target.clone(),
+        });
+        assert!(!login.credentials_unavailable);
+        assert_eq!(login.sso_login, Some(target));
+    }
 
     #[test]
     fn native_failures_preserve_core_cancellation_metadata() {

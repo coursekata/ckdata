@@ -8,15 +8,29 @@ deprecated_columns <- function(read, changes) {
   changes |>
     dplyr::semi_join(read, by = c("table", "column")) |>
     dplyr::mutate(
-      note = deprecation_note(.data$table, .data$new_table, .data$new_column, .data$removed_on)
+      note = deprecation_note(
+        .data$table,
+        .data$new_table,
+        .data$new_column,
+        .data$removed_on
+      )
     ) |>
     dplyr::select("table", "column", "note")
 }
 
 deprecation_note <- function(table, new_table, new_column, removed_on) {
   instead <- dplyr::case_when(
-    !is.na(new_column) & new_table == table ~ stringr::str_c("; use `", new_column, "`"),
-    !is.na(new_column) ~ stringr::str_c("; use `", new_column, "` on ", new_table),
+    !is.na(new_column) & new_table == table ~ stringr::str_c(
+      "; use `",
+      new_column,
+      "`"
+    ),
+    !is.na(new_column) ~ stringr::str_c(
+      "; use `",
+      new_column,
+      "` on ",
+      new_table
+    ),
     !is.na(new_table) ~ stringr::str_c("; see ", new_table),
     .default = ", with no replacement"
   )

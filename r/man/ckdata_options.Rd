@@ -14,15 +14,16 @@ without notice. One of \code{"explore"} (the default), \code{"audit"} or \code{"
 for example \code{list(mart_responses = c("lrn_type", "item_id"))}. An allowed column is never
 reported or removed, in any mode.
 \item \code{ckdata.verbose}: \code{TRUE} reports when \code{\link[=collect_saved]{collect_saved()}} reuses a saved
-result. Defaults to \code{FALSE}. Core failure and role-expiry warnings remain
+result. Defaults to \code{FALSE}. Core failures remain
 visible in either setting.
 \item \code{ckdata.timeout}: query timeout in seconds, including result download and
 empty-schema recovery. Defaults to 1800; a cancellation stop request can
 require additional time as documented by the shared core.
-\item \code{ckdata.login}: allow browser-based AWS SSO sign-in when a new connection
-requires it. Defaults to \code{\link[rlang:is_interactive]{rlang::is_interactive()}}. FALSE fails immediately;
+\item \code{ckdata.login}: allow browser-based AWS SSO sign-in on a connection and
+its later operations. Captured when the connection is opened. Defaults to \code{\link[rlang:is_interactive]{rlang::is_interactive()}}. FALSE fails immediately;
 an explicit \code{DBI::dbConnect(..., login = ...)} overrides this option.
-Browser sign-in uses AWS CLI v2 and retries the connection once.
+Browser sign-in uses AWS CLI v2 and retries credential acquisition once
+per top-level operation, preserving the existing connection and query.
 \item \code{ckdata.freshness}: default \code{\link[=collect_saved]{collect_saved()}} policy; see \code{\link[=daily_at]{daily_at()}}.
 Explicit collection, table and connection policies take precedence, in
 that order. The option overrides \code{CKDATA_FRESHNESS_AT} and

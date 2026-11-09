@@ -10,13 +10,19 @@ NULL
 core_versions <- function() .Call(wrap__core_versions)
 
 #' @noRd
-native_connect <- function(workgroup, schema, profile, region, role_arn) .Call(wrap__native_connect, workgroup, schema, profile, region, role_arn)
+native_connect <- function(settings, login_allowed) .Call(wrap__native_connect, settings, login_allowed)
 
 #' @noRd
 native_ready <- function(object) .Call(wrap__native_ready, object)
 
 #' @noRd
 native_cancel <- function(object) .Call(wrap__native_cancel, object)
+
+#' @noRd
+native_login_target <- function(object) .Call(wrap__native_login_target, object)
+
+#' @noRd
+native_login_complete <- function(object, success) .Call(wrap__native_login_complete, object, success)
 
 #' @noRd
 native_job_value <- function(object) .Call(wrap__native_job_value, object)

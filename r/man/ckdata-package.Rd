@@ -3,9 +3,9 @@
 \docType{package}
 \name{ckdata-package}
 \alias{ckdata-package}
-\title{Query the CourseKata data lake}
+\title{Query Amazon Athena}
 \description{
-A read-only DBI and dbplyr interface to the CourseKata data lake. A shared Rust core executes Athena queries through Parquet and returns Arrow results, including schemas for empty results. Researchers can use lazy dplyr queries, SQL, temporary saved results and reproducible snapshots.
+A read-only DBI and dbplyr interface to Amazon Athena. A shared Rust core executes Athena queries through Parquet and returns Arrow results, including schemas for empty results. Researchers can use lazy dplyr queries, SQL, temporary saved results and reproducible snapshots.
 }
 \seealso{
 Useful links:

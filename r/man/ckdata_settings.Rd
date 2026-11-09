@@ -4,42 +4,78 @@
 \alias{ckdata_settings}
 \title{Connection settings}
 \description{
-Credentials and region use standard AWS profiles, SSO and environment
-configuration. Set \code{AWS_PROFILE} and \code{AWS_REGION} as appropriate, or pass
-\code{profile} and \code{region} to \code{DBI::dbConnect()}. When an interactive connection
-needs AWS SSO sign-in, ckdata runs AWS CLI v2 to open the browser, then
-retries the connection once. Profiles chained through \code{source_profile}
-use their SSO source profile. Existing credentials use the normal SDK path.
+Connection arguments take precedence over configuration. \code{ckdata.workgroup}
+and \code{ckdata.schema} options take precedence over their environment settings.
+The canonical environment names and compatibility aliases are:
 }
 \details{
-Set \code{login = FALSE} in \code{DBI::dbConnect()} or option \code{ckdata.login = FALSE}
-to fail immediately without sign-in. The connection argument overrides the
-option; otherwise the default is \code{\link[rlang:is_interactive]{rlang::is_interactive()}}. Scripts and jobs
-therefore default to fail-fast behavior. Explicit TRUE permits sign-in.
-Cancellation, failed login and a failed retry propagate without a login loop.
-No browser login is started for permission denials, other authentication
-methods, or expiry of an existing fixed-role connection.
+\tabular{ll}{
+   Canonical \tab Legacy R package alias \cr
+   \code{CKDATA_PROFILE} \tab \code{CK_DATALAKE_INTERNAL_PROFILE} \cr
+   \code{CKDATA_REGION} \tab \code{CK_DATALAKE_REGION} \cr
+   \code{CKDATA_WORKGROUP} \tab \code{CK_DATALAKE_WORKGROUP} \cr
+   \code{CKDATA_SCHEMA} \tab \code{CK_DATALAKE_SCHEMA} \cr
+   \code{CKDATA_ROLE_ARN} \tab \code{CK_DATALAKE_ROLE_ARN} \cr
+   \code{CKDATA_OUTPUT_LOCATION} \tab \code{CK_DATALAKE_S3_STAGING_DIR} \cr
+}
 
-\code{CK_DATALAKE_WORKGROUP} (or option \code{ckdata.workgroup}) selects the Athena
-workgroup. Its configuration supplies the result location and encryption;
-a separate staging-directory setting is unnecessary. \code{CK_DATALAKE_SCHEMA}
-and option \code{ckdata.schema} select the default database.
 
-\code{CK_DATALAKE_ROLE_ARN} optionally names an additional role to assume once.
-It expires after at most one hour without renewal. Reconnect explicitly
-after expiry: call \code{\link[=lake_disconnect]{lake_disconnect()}}, then rebuild saved lazy queries from
-a fresh \code{\link[=lake_tbl]{lake_tbl()}}. Saved queries keep their original connection. For an
-explicit DBI connection, close and recreate it and rebuild its lazy queries.
-Managed helpers do not silently open another role session.
+A canonical variable takes precedence when present, including an empty value.
+An empty canonical value masks its legacy alias: an empty \code{CKDATA_ROLE_ARN},
+for example, disables an inherited additional role. If the canonical name is
+absent, the legacy name is read; an empty legacy value counts as unset.
+Aliases are resolved without changing the process's AWS environment.
 
-For compatibility, managed helpers also accept \code{CK_DATALAKE_INTERNAL_PROFILE}
-and \code{CK_DATALAKE_REGION}. Explicit DBI connections use the standard AWS
-chain unless their corresponding arguments are supplied.
+Both managed helpers and explicit DBI connections use this configuration.
+Explicit NULL for \code{profile}, \code{region}, \code{role_arn} or \code{output_location} bypasses
+that setting. Without package-specific profile or region settings, the normal
+AWS SDK chain applies, including \code{AWS_PROFILE}, \code{AWS_REGION}, shared profiles
+and workload credentials. No account, role, region or workgroup is built in.
+The schema defaults to \code{"default"}; configure it explicitly for CourseKata.
 
-Saved-result freshness can be set through \code{CKDATA_FRESHNESS_AT=07:00} and
-\code{CKDATA_FRESHNESS_TZ=America/Los_Angeles}, or option \code{ckdata.freshness}.
-Explicit \code{freshness} arguments to \code{\link[=collect_saved]{collect_saved()}}, \code{\link[=lake_tbl]{lake_tbl()}} and
-\code{DBI::dbConnect(ckdata(), ...)} override those defaults, in that order.
-See \code{\link[=daily_at]{daily_at()}} for schedules and completed-build revision checks. Normal
-\code{\link[dplyr:collect]{dplyr::collect()}} is unaffected by saved-result configuration.
+The workgroup supplies the result location and encryption settings by default.
+\code{CKDATA_OUTPUT_LOCATION} can supply or override the S3 prefix when the workgroup
+permits client settings. Enforced workgroup settings always take precedence.
+The legacy staging-directory variable therefore remains functional without
+changing the workgroup or creating AWS resources.
+
+A named \code{profile} argument selects that profile's authentication provider,
+ignoring SSO environment settings and unrelated ambient access keys. Without
+an explicit profile, \code{CKDATA_PROFILE} (or its legacy alias) selects a profile
+unless direct SSO settings take precedence. Without ckdata authentication
+settings, the standard AWS credential chain applies, including \code{AWS_PROFILE}.
+
+Direct SSO uses \code{sso_start_url}, \code{sso_region}, \code{sso_account_id} and
+\code{sso_role_name}, or the corresponding \verb{CKDATA_SSO_*} environment variables.
+Individual arguments override their environment settings. Missing fields can
+come from one selected plain SSO profile; role chains are never inherited by
+direct SSO. Individual SSO overrides of an explicitly selected chained profile
+are rejected. \code{CKDATA_SSO_SESSION} optionally names a shared login session;
+\code{CKDATA_SSO_REGISTRATION_SCOPES} defaults to \code{sso:account:access}.
+
+\code{CKDATA_ROLE_ARN} optionally requires an additional role. AWS providers renew
+temporary credentials while their source permits; there is no fixed connection
+lifetime. A profile already targeting the exact required role is reused.
+Other sources must assume it successfully; failure never permits data access
+with the source identity. No extra IAM lookup permission is needed.
+
+Interactive R connections offer AWS SSO browser sign-in through AWS CLI v2
+when silent renewal cannot restore the resolved SSO source. A running request
+stays in its original native job during sign-in; SQL is not resubmitted.
+Set \code{login = FALSE} in \code{DBI::dbConnect()} or \code{options(ckdata.login = FALSE)}
+to fail instead. The argument overrides the option; otherwise the default is
+\code{\link[rlang:is_interactive]{rlang::is_interactive()}}. Scripts and jobs default to fail-fast. This controls
+ckdata's login process, not an external profile \code{credential_process} helper.
+Each top-level connection, query or fetch permits one browser login and one
+credential retry. Failed login, cancellation or a failed retry stops the
+operation. Permission denials never trigger browser login or profile hunting.
+AWS owns token caching; direct SSO uses a private subprocess-only config file
+that is removed after the login process exits. The R process's AWS environment
+and the user's AWS configuration are not modified.
+
+Saved-result freshness uses \code{CKDATA_FRESHNESS_AT} and \code{CKDATA_FRESHNESS_TZ}, or
+option \code{ckdata.freshness}. No schedule or timezone is built in. Collection,
+table and connection policies take precedence, in that order. See \code{\link[=daily_at]{daily_at()}}
+for schedules and completed-build revision checks. Normal \code{\link[dplyr:collect]{dplyr::collect()}}
+is unaffected by saved-result configuration.
 }
