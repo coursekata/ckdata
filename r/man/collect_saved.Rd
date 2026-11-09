@@ -62,6 +62,7 @@ persistent directories and snapshots are not automatically deleted. Saved
 files can be read offline; they do not enforce source authorization.
 
 Writes publish complete Parquet files atomically. Concurrent misses may run
-duplicate queries; the last successful publication wins. No global ordering
+duplicate queries. Normal results keep the last successful publication;
+snapshots retain and return the first publication. No global ordering
 is added. Ordinary \code{\link[dplyr:collect]{dplyr::collect()}} always uses its normal query path.
 }

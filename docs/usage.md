@@ -4,8 +4,10 @@ Complete [installation and configuration](installation.md) first. That guide
 also records which parts of the target R and Python interface are available
 in the current build.
 
-For a step-by-step acceptance session using invented data, follow the
-[researcher walkthrough](researcher-walkthrough.md).
+CourseKata's internal documentation covers researcher installation and access.
+The [internal researcher runbook](researcher-walkthrough.md) and
+[QA acceptance runbook](qa-walkthrough.md) are separate local review workflows
+using invented data, rather than package onboarding instructions.
 
 ## Queries in R
 
@@ -17,9 +19,7 @@ executing it. Printing a lazy table previews rows and therefore runs a query.
 library(ckdata)
 library(dplyr)
 
-query <- lake_tbl("my_table") |>
-  filter(category == "example") |>
-  summarise(n = n())
+query <- lake_tbl("mart_classes") |> count()
 
 show_query(query)
 collect(query)
@@ -141,8 +141,9 @@ without one, the query error propagates.
 Keys include the exact SQL and source/access context, plus applicable managed
 column policy for ckdata connections. Other DBI backends require an explicit
 named `source` context; see `?collect_saved`. Concurrent callers can both fetch;
-each writes a temporary sibling file and publishes it by rename. The last
-successful write wins, with no lock service.
+each writes a complete temporary sibling file before publishing. Normal results
+replace the previous file, so the last publication wins. Snapshots publish
+without replacement and return the first published result. No lock service is used.
 
 ## Queries in Python
 
@@ -185,12 +186,13 @@ with SQL `ORDER BY`. Sort after retrieval when order matters, for example
 
 ## Sessions and parallel work
 
-An additional assumed-role session expires without renewal, after at most one
-hour. For managed R connections, call `lake_disconnect()`, then rebuild lazy
-queries from a fresh `lake_tbl()`. Existing lazy queries retain their old
-connection. For explicit DBI connections, close and recreate the connection and
-rebuild its lazy queries. Expiring-role warnings appear during the last fifteen
-minutes of the lease.
+AWS providers renew temporary credentials, including additional assumed roles,
+while their source permits. Interactive SSO reauthentication opens AWS CLI's
+browser flow when necessary; `login = FALSE` disables that interaction. A
+running request resumes in the same native job after sign-in, without creating
+another query. Permission denials stop immediately and never select another
+identity. Call `lake_disconnect()` before changing connection settings; existing
+lazy queries retain their original connection.
 
 For parallel R work, use fresh sessions or PSOCK workers and connect inside each
 worker. Forking after ckdata's native runtime starts cannot safely inherit the
