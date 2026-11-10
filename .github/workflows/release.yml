@@ -21,8 +21,8 @@ jobs:
   readiness:
     runs-on: ubuntu-latest
     env:
-      # Enable only after the public R query API and distribution acceptance pass.
-      R_RELEASE_READY: "false"
+      # Publication still requires successful main CI and matching versions.
+      R_RELEASE_READY: "true"
     steps:
       - name: Require first-release readiness
         run: |
