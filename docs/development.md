@@ -180,8 +180,9 @@ just test --target tooling
 ```
 
 The `bindings` dependency group supplies maturin, PyArrow, dataframe libraries
-and pytest. Setup installs build dependencies before compiling the binding;
-ordinary Python tests reuse the locked build tools without build isolation.
+and pytest. Setup and Python tests use uv's package-specific build setting to
+install locked build tools before compiling the binding, including in a fresh
+environment.
 Distribution builds use the backend's isolated build path.
 
 ## Testing

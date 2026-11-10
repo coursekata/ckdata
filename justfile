@@ -13,8 +13,7 @@ setup:
     @for tool in rustup Rscript node npm actionlint gitleaks; do command -v "$tool" >/dev/null || { echo "Install $tool first; see docs/development.md" >&2; exit 1; }; done
     if [ -d r/src/rust/target ]; then cargo clean --manifest-path r/src/rust/Cargo.toml --target-dir r/src/rust/target; fi
     rustup component add rustfmt clippy
-    uv sync --locked --group bindings --no-install-workspace
-    uv sync --locked --group bindings --all-packages --no-build-isolation
+    uv sync --locked --group bindings --all-packages --no-build-isolation-package ckdata
     cargo fetch --locked
     cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
     just _setup-repository-tools
@@ -115,7 +114,7 @@ _test-r:
     Rscript --vanilla -e 'Sys.setenv(R_INCLUDE_DIR = R.home("include"), DEBUG = "true", CKDATA_RUN_LIVE_TESTS = "false"); status <- system2("cargo", c("test", "--manifest-path", "r/src/rust/Cargo.toml", "--all-targets", "--locked")); if (status != 0L) quit(status = status); devtools::test("r", stop_on_failure = TRUE)'
 
 _test-python:
-    uv run --locked --no-build-isolation --group bindings --all-packages pytest python/tests
+    uv run --locked --no-build-isolation-package ckdata --group bindings --all-packages pytest python/tests
 
 _test-tooling:
     uv run --locked pytest tests

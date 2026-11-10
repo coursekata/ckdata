@@ -107,7 +107,7 @@ jobs:
             --lockfile Cargo.lock --lockfile r/src/rust/Cargo.lock --lockfile uv.lock \
             --lockfile .github/package-lock.json \
             --no-call-analysis rust --no-resolve --all-packages --all-vulns \
-            --x-no-default-plugins --x-plugins rust/cargolock,python/uvlock,javascript/packagejson \
+            --x-no-default-plugins --x-plugins rust/cargolock,python/uvlock,javascript/packagelockjson,javascript/packagejson \
             --recursive --no-ignore \
             --x-exclude 'g:**/*[sS][aA][gG][aA]*' \
             --format json --output-file "$RUNNER_TEMP/dependency-osv-npm.json" \
