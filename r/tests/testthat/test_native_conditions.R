@@ -90,7 +90,7 @@ test_that("native handle errors become rlang conditions with their cause", {
 })
 
 test_that("a cancelled native job signals an error with a trace", {
-  job <- native_probe_job(60000)
+  job <- native_probe_job(pending = TRUE)
   native_cancel(job)
   cnd <- rlang::catch_cnd(native_wait(job), classes = "error")
   expect_s3_class(cnd, "ckdata_native_error")
