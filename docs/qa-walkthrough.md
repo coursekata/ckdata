@@ -13,9 +13,9 @@ SafeInsights enclave. Those remain separate final acceptance checks.
 
 ## Start the prepared project
 
-For this local checkout, the isolated project is `.local/researcher-uat/`. It
-contains AWS configuration and a `snapshots/` directory. The development build
-is installed in the normal R user library.
+Use the same prepared synthetic directory as the researcher walkthrough; the
+operator supplies its location. It contains AWS configuration and a `snapshots/`
+directory. The development build is installed in the normal R user library.
 It is ignored by Git. Preparing it does not sign in, assume roles or query AWS.
 Another tester needs an operator to provide equivalent fixture-only configuration.
 
@@ -31,10 +31,11 @@ session needs sign-in, the first connection opens AWS's browser login; complete
 it there while the R call waits. Connections can reuse a sign-in from the
 researcher walkthrough. AWS CLI v2 must be installed and available on R's PATH.
 
-The local configuration uses a synthetic source role and asks ckdata to assume
-the restricted synthetic research reader once. It provides no embedded access
-keys. Browser sign-in is still required for live queries. No sign-in or live-resource
-verification is performed merely by preparing these files.
+The local configuration uses a synthetic source role and requires the restricted
+synthetic research reader. AWS providers renew its credentials while the source
+permits. It provides no embedded access keys. Live queries require valid
+credentials; an existing sign-in can be reused. Preparing these files does not
+sign in or verify live resources.
 
 ## 1. Check the installation and connect
 
@@ -67,9 +68,14 @@ and workgroup `ck-datalake-tst-ckdata-research`. Check before proceeding:
 
 ```r
 stopifnot(
+  info$account == "903709589067",
+  info$region == "us-west-2",
   info$schema == "ck_datalake_tst_ckdata_fixtures",
   info$workgroup == "ck-datalake-tst-ckdata-research",
-  grepl(":assumed-role/ck-datalake-tst-ckdata-research-reader/", info$arn, fixed = TRUE)
+  startsWith(
+    info$arn,
+    "arn:aws:sts::903709589067:assumed-role/ck-datalake-tst-ckdata-research-reader/"
+  )
 )
 ```
 
@@ -79,6 +85,9 @@ AWS CLI v2 is available if the login tool cannot be started. Do not change the
 workgroup, role or database to a real research environment.
 
 ### Optional signed-out fail-fast check
+
+A fresh R session does not sign out AWS. Skip this negative check when reusing
+the successful researcher sign-in; `login = FALSE` still accepts valid credentials.
 
 In a separate fresh session that has loaded the prepared settings and is still
 signed out, `dbConnect(ckdata::ckdata(), login = FALSE)` should report that sign-in
@@ -282,7 +291,7 @@ In an unconfigured R session, their default is the current directory. Normal
 saved results use temporary storage by default. A persistent directory for
 normal saves keeps the files, but freshness rules still apply.
 
-## 10. Reconnect, then read a snapshot without AWS
+## 10. Reuse a snapshot after reconnecting, then read it offline
 
 ```r
 dbDisconnect(con)
@@ -297,7 +306,8 @@ collect_saved(rebuilt, snapshot = "baseline", dir = snapshot_dir)
 dbDisconnect(con)
 ```
 
-Expect the original snapshot for the same SQL and source/access identity. An
+Reconnecting and discovering table metadata contact AWS. Expect the original
+snapshot for the same SQL and source/access identity, without another data query. An
 additional assumed-role session renews through AWS while its source permits.
 Reconnect and rebuild lazy tables when deliberately changing connection settings.
 
@@ -361,7 +371,7 @@ live tests focused on AWS/Parquet integration that offline tests cannot establis
 | R types, Arrow ownership and empty results | [test_types.R](../r/tests/testthat/test_types.R), [test_handoff.R](../r/tests/testthat/test_handoff.R) |
 | Saved-result identity, reconnects, snapshots and failures | [test_collect_saved.R](../r/tests/testthat/test_collect_saved.R) |
 | Schedule precedence, DST and revision checks | [test_freshness.R](../r/tests/testthat/test_freshness.R) |
-| Managed settings, expiry and explicit reconnection | [test_settings.R](../r/tests/testthat/test_settings.R) |
+| Managed settings and explicit reconnection | [test_settings.R](../r/tests/testthat/test_settings.R) |
 | Automatic SSO login, fail-fast options, retry limits and cancellation | [test_auth.R](../r/tests/testthat/test_auth.R) |
 | Column-policy behavior | [test_column_policy.R](../r/tests/testthat/test_column_policy.R) |
 
