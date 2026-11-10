@@ -22,9 +22,13 @@ pytest directly. `build --check` validates the built R source archive and tests
 the installed Python wheel in a temporary environment; it publishes nothing.
 
 CI builds the actual R source tarball, then runs `R CMD check` against it on Linux,
-macOS and Windows. The release workflow installs R-universe binaries without Rust
-and runs testthat against the installed package. There is no separate R build
-simulator or tarball checker.
+macOS and Windows as soon as that archive is ready. Rust lint, core tests and
+Python binding tests run in separate jobs. The final gate requires every check;
+native caches are saved after failed checks so later runs can reuse completed
+builds. Both Rust workspaces use thin LTO for release builds and leave parallel
+code generation at Cargo's default. The release workflow installs R-universe
+binaries without Rust and runs testthat against the installed package. There is no
+separate R build simulator or tarball checker.
 
 The R crate has its own workspace so the source package builds independently of
 this checkout. The R test recipe runs its native tests separately from the root
