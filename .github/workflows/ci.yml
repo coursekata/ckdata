@@ -44,35 +44,85 @@ jobs:
         run: |
           uv run --locked pytest tests/unit
 
-      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
-        env:
-          # quality scans the whole history for secrets.
-          SKIP: gitleaks-system
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          prek-version: "0.5.9"
-          extra-args: --all-files
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: .github/package-lock.json
 
-      - name: Capture the existing Renovate validator dependency graph
+      - name: Install repository checkers
+        env:
+          # renovate: datasource=github-releases depName=rhysd/actionlint
+          ACTIONLINT_VERSION: v1.7.12
+        run: |
+          uv sync --locked
+          uv run --locked just _setup-repository-tools
+          go install github.com/rhysd/actionlint/cmd/actionlint@"$ACTIONLINT_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
+
+      - name: Check formatting and repository tooling
+        run: |
+          uv run --locked just fmt --check
+          uv run --locked just lint --target python
+          uv run --locked just lint --target repo
+
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+        with:
+          packages: |
+            any::lintr
+            any::jsonlite
+          cache: always
+          install-pandoc: false
+          install-quarto: false
+      - name: Check R static analysis
+        run: uv run --locked just lint --target r
+
+      - name: Install OSV-Scanner
+        env:
+          # renovate: datasource=github-releases depName=google/osv-scanner
+          OSV_VERSION: v2.7.0
+        run: |
+          base="https://github.com/google/osv-scanner/releases/download/$OSV_VERSION"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/osv-scanner_linux_amd64"
+          curl -fsSLO "$base/osv-scanner_SHA256SUMS"
+          grep ' osv-scanner_linux_amd64$' osv-scanner_SHA256SUMS | sha256sum -c -
+          mv osv-scanner_linux_amd64 osv-scanner
+          chmod +x osv-scanner
+
+      - name: Audit the lockfiles and installed Renovate validator
         run: |
           mkdir -p "$RUNNER_TEMP/npm-inventory"
           touch "$RUNNER_TEMP/npm-inventory/user.npmrc" "$RUNNER_TEMP/npm-inventory/global.npmrc"
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npm-inventory/user.npmrc"
           export NPM_CONFIG_GLOBALCONFIG="$RUNNER_TEMP/npm-inventory/global.npmrc"
           export NPM_CONFIG_CACHE="$RUNNER_TEMP/npm-inventory/cache"
-          npm_root=$(prek exec renovate-config-validator -- npm root --global)
           set +e
-          prek exec renovate-config-validator -- npm ls --all --json --prefix "$npm_root/renovate" \
+          npm ls --all --json --prefix .github \
             > "$RUNNER_TEMP/renovate-tree.json"
           status=$?
           set -e
-          # The report retains ELSPROBLEMS and every existing version. Other failures are fatal.
           if [ "$status" -gt 1 ]; then exit "$status"; fi
-      - name: Retain informational Rust and complete Node tooling advisories
-        run: |
-          uv run --locked python -m scripts.audit_dependencies scan \
-            --npm-tree "$RUNNER_TEMP/renovate-tree.json" \
-            --output "$RUNNER_TEMP/dependency-osv-npm.json" \
-            --summary "$GITHUB_STEP_SUMMARY"
+          set +e
+          "$RUNNER_TEMP/osv-scanner" scan source \
+            --lockfile Cargo.lock --lockfile r/src/rust/Cargo.lock --lockfile uv.lock \
+            --lockfile .github/package-lock.json \
+            --no-call-analysis rust --no-resolve --all-packages --all-vulns \
+            --x-no-default-plugins --x-plugins rust/cargolock,python/uvlock,javascript/packagelockjson,javascript/packagejson \
+            --recursive --no-ignore \
+            --x-exclude 'g:**/*[sS][aA][gG][aA]*' \
+            --format json --output-file "$RUNNER_TEMP/dependency-osv-npm.json" \
+            .github/node_modules
+          status=$?
+          set -e
+          # OSV uses 1 for findings; the full inventory is retained for review.
+          # Trivy gates fixed HIGH/CRITICAL findings in dependency-inventory.
+          if [ "$status" -gt 1 ]; then exit "$status"; fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -84,49 +134,82 @@ jobs:
           retention-days: 30
 
   rust:
+    name: rust (${{ matrix.task }})
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { task: lint, recipe: lint, target: rust, profile: dev }
+          - { task: core, recipe: test, target: rust, profile: dev }
+          - { task: python, recipe: test, target: python, profile: release }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install clippy
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+        if: matrix.task == 'lint'
+        with:
+          use-public-rspm: true
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Install Clippy
+        if: matrix.task == 'lint'
+        run: rustup component add clippy
+      - name: Identify the native build environment
         id: toolchain
+        env:
+          NATIVE_TASK: ${{ matrix.task }}
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          toolchain_key=$({ rustc -vV; printf '%s\n' "${ImageOS:-}" "${ImageVersion:-}"; } | sha256sum | cut -d ' ' -f 1)
+          toolchain_key=$({
+            rustc -vV
+            printf '%s\n' "${ImageOS:-}" "${ImageVersion:-}" "${RUSTFLAGS:-}" "${CARGO_BUILD_TARGET:-}"
+            if [ "$NATIVE_TASK" = lint ]; then Rscript --vanilla -e 'cat(R.version.string, R.version[["platform"]], sep = "\n")'; fi
+            if [ "$NATIVE_TASK" = python ]; then uv run --no-project python -c 'import sys, sysconfig; print(sys.version); print(sysconfig.get_config_var("SOABI"))'; fi
+          } | sha256sum | cut -d ' ' -f 1)
           echo "key=$toolchain_key" >> "$GITHUB_OUTPUT"
 
-      - name: Cache Cargo downloads and workspace builds
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Cargo downloads and workspace builds
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml') }}
+          key: cargo-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task }}-${{ matrix.profile }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.lock', 'r/src/rust/Cargo.toml', 'pyproject.toml', 'python/pyproject.toml', 'uv.lock') }}-${{ hashFiles('core/**/*.rs', 'python/**/*.rs', 'python/**/*.py', 'r/src/rust/**/*.rs', 'justfile', '!**/*[sS][aA][gG][aA]*', '!**/*[sS][aA][gG][aA]*/**', '!**/.local/**', '!**/.aws/**', '!**/target/**', '!**/.venv/**', '!**/node_modules/**') }}
+          restore-keys: cargo-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.task }}-${{ matrix.profile }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.lock', 'r/src/rust/Cargo.toml', 'pyproject.toml', 'python/pyproject.toml', 'uv.lock') }}-
 
-      # Lints the Python binding too.
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Run ${{ matrix.task }} checks
+        env:
+          NATIVE_RECIPE: ${{ matrix.recipe }}
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: uv run --locked just "$NATIVE_RECIPE" --target "$NATIVE_TARGET"
 
-      # The binding has no Rust tests, and its test binary would need libpython to link.
-      - run: cargo test --workspace --all-targets --locked --exclude ckdata-py
-
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.11"
-      - name: Test the compiled Python binding
-        run: uv run --locked --group bindings --all-packages pytest python/tests
-
-      - name: Verify locked Cargo license notices
+      - name: Check for Cargo cache data
+        id: cache-data
+        if: ${{ (success() || failure()) && steps.cache.outputs.cache-primary-key != '' && steps.cache.outputs.cache-hit != 'true' }}
         run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path r/src/rust/Cargo.toml
-          python3 scripts/check_licenses.py
+          if [ -d "$HOME/.cargo/registry" ] || [ -d "$HOME/.cargo/git" ] || [ -d target ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save Cargo downloads and workspace builds
+        if: ${{ (success() || failure()) && steps.cache-data.outputs.exists == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   rust-minimum:
-    timeout-minutes: 15
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
@@ -145,22 +228,49 @@ jobs:
           minimum=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' core/Cargo.toml)
           rustup toolchain install "$minimum" --profile minimal
           echo "version=$minimum" >> "$GITHUB_OUTPUT"
-          toolchain_key=$({ rustc +"$minimum" -vV; printf '%s\n' "${ImageOS:-}" "${ImageVersion:-}"; } | sha256sum | cut -d ' ' -f 1)
+          toolchain_key=$({ rustc +"$minimum" -vV; Rscript --vanilla -e 'cat(R.version.string, R.version[["platform"]], sep = "\n")'; printf '%s\n' "${ImageOS:-}" "${ImageVersion:-}" "${RUSTFLAGS:-}" "${CARGO_BUILD_TARGET:-}"; } | sha256sum | cut -d ' ' -f 1)
           echo "key=$toolchain_key" >> "$GITHUB_OUTPUT"
-      - name: Cache the minimum toolchain build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the minimum toolchain build
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-msrv-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.minimum.outputs.key }}-${{ hashFiles('Cargo.lock', 'r/src/rust/Cargo.lock', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.toml') }}
-      - name: Check both workspaces at the declared minimum
+          key: cargo-msrv-v2-${{ runner.os }}-${{ runner.arch }}-dev-${{ steps.minimum.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'r/src/rust/Cargo.lock', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.toml') }}-${{ hashFiles('core/**/*.rs', 'python/**/*.rs', 'r/src/rust/**/*.rs', '!**/*[sS][aA][gG][aA]*', '!**/*[sS][aA][gG][aA]*/**', '!**/.local/**', '!**/.aws/**', '!**/target/**', '!**/.venv/**', '!**/node_modules/**') }}
+          restore-keys: cargo-msrv-v2-${{ runner.os }}-${{ runner.arch }}-dev-${{ steps.minimum.outputs.key }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'r/src/rust/Cargo.lock', 'core/Cargo.toml', 'python/Cargo.toml', 'r/src/rust/Cargo.toml') }}-
+      - name: Check the root workspace at the declared minimum
+        env:
+          MINIMUM_RUST: ${{ steps.minimum.outputs.version }}
+        run: cargo +"$MINIMUM_RUST" check --workspace --all-targets --locked
+
+      - name: Test the R native bridge at the declared minimum
+        shell: Rscript {0}
         env:
           MINIMUM_RUST: ${{ steps.minimum.outputs.version }}
         run: |
-          cargo +"$MINIMUM_RUST" check --workspace --all-targets --locked
-          cargo +"$MINIMUM_RUST" check --manifest-path r/src/rust/Cargo.toml --locked
+          Sys.setenv(R_INCLUDE_DIR = R.home("include"))
+          status <- system2("cargo", c(paste0("+", Sys.getenv("MINIMUM_RUST")),
+            "test", "--manifest-path", "r/src/rust/Cargo.toml", "--all-targets", "--locked"))
+          quit(status = status)
+
+      - name: Check for Cargo cache data
+        id: cache-data
+        if: ${{ (success() || failure()) && steps.cache.outputs.cache-primary-key != '' && steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          if [ -d "$HOME/.cargo/registry" ] || [ -d "$HOME/.cargo/git" ] || [ -d target ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the minimum toolchain build
+        if: ${{ (success() || failure()) && steps.cache-data.outputs.exists == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   dependency-inventory:
     timeout-minutes: 15
@@ -175,29 +285,27 @@ jobs:
           TRIVY_VERSION: v0.76.1
         with:
           version: ${{ env.TRIVY_VERSION }}
-      - name: Export every development lock record for scanning
-        run: python3 -m scripts.audit_dependencies export --output "$RUNNER_TEMP/dependency-inventory"
       - name: Inventory all severities, including unfixed advisories
         run: |
-          trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
-            --include-dev-deps --ignore-unfixed=false --ignorefile '' --config '' \
-            --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
-            --format json --output "$RUNNER_TEMP/dependency-inventory.json" \
-            "$RUNNER_TEMP/dependency-inventory"
-          python3 -m scripts.audit_dependencies verify "$RUNNER_TEMP/dependency-inventory.json"
-          {
-            echo '### Dependency advisory inventory'
-            echo 'Fixed HIGH/CRITICAL findings fail this job. The retained inventory includes every severity and unfixed finding.'
-            jq -r '.Results[] | .Vulnerabilities[]? | "- \(.Severity): \(.PkgName) \(.InstalledVersion), \(.VulnerabilityID), fix: \(.FixedVersion // "unreleased")"' "$RUNNER_TEMP/dependency-inventory.json"
-          } >> "$GITHUB_STEP_SUMMARY"
-          trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
-            --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress \
-            "$RUNNER_TEMP/dependency-inventory"
+          mkdir -p "$RUNNER_TEMP/dependency-inventory"
+          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock .github/package-lock.json; do
+            trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+              --include-dev-deps --ignore-unfixed=false --ignorefile '' --config '' \
+              --list-all-pkgs --show-suppressed --exit-code 0 --no-progress \
+              --format json --output "$RUNNER_TEMP/dependency-inventory/${lock//\//-}.json" \
+              "$lock"
+          done
+      - name: Gate fixed HIGH and CRITICAL findings
+        run: |
+          for lock in Cargo.lock r/src/rust/Cargo.lock uv.lock .github/package-lock.json; do
+            trivy fs --scanners vuln --severity HIGH,CRITICAL --include-dev-deps \
+              --ignore-unfixed --ignorefile '' --config '' --exit-code 1 --no-progress "$lock"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: dependency-advisory-inventory
-          path: ${{ runner.temp }}/dependency-inventory.json
+          path: ${{ runner.temp }}/dependency-inventory/*.json
           if-no-files-found: error
           retention-days: 30
 
@@ -213,19 +321,8 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Install Rust for build integration tests
-        run: rustup toolchain install stable --profile minimal
-
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-
-      - name: Run R build integration tests
-        run: uv run --locked pytest tests/integration
-
       - name: Build the source tarball
         run: R CMD build r
-
-      - name: Check the tarball carries the core
-        run: python3 -m scripts.check_r_tarball ckdata_*.tar.gz
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -236,12 +333,11 @@ jobs:
 
   r:
     name: r (${{ matrix.os }}, R ${{ matrix.r }})
-    # Fail the inexpensive checks before starting native R builds.
-    needs: [quality, hooks, rust, rust-minimum, dependency-inventory, r-source]
+    needs: [r-source]
     timeout-minutes: 45
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - { os: ubuntu-latest, r: release }
@@ -269,6 +365,8 @@ jobs:
           working-directory: r
           extra-packages: any::rcmdcheck
           needs: check
+          cache: always
+          install-quarto: false
 
       # Rtools links R packages with the GNU toolchain, which the Windows build targets.
       - name: Install Rust
@@ -287,24 +385,48 @@ jobs:
           paths <- c(CARGO_HOME = file.path(cache, "home"), CARGO_TARGET_DIR = file.path(cache, "target"))
           cat(paste(names(paths), paths, sep = "="), file = Sys.getenv("GITHUB_ENV"), sep = "\n", append = TRUE)
           identity <- tempfile()
+          target <- if (.Platform$OS.type == "windows") {
+            paste0(if (.Machine$sizeof.pointer == 8L) "x86_64" else "i686", "-pc-windows-gnu")
+          } else "host"
           writeLines(c(system2("rustc", "-vV", stdout = TRUE), R.version.string, R.version$platform,
-            Sys.getenv(c("ImageOS", "ImageVersion", "MACOSX_DEPLOYMENT_TARGET", "RUSTFLAGS"))), identity)
+            target, "release", Sys.getenv(c("ImageOS", "ImageVersion", "MACOSX_DEPLOYMENT_TARGET", "RUSTFLAGS", "CARGO_BUILD_TARGET"))), identity)
           cat(paste0("key=", unname(tools::md5sum(identity))), file = Sys.getenv("GITHUB_OUTPUT"), sep = "\n", append = TRUE)
 
-      - name: Cache R's Cargo downloads and builds
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore R's Cargo downloads and builds
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/ckdata-cargo/home/registry
             ${{ runner.temp }}/ckdata-cargo/home/git
             ${{ runner.temp }}/ckdata-cargo/target
-          key: cargo-r-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.cargo.outputs.key }}-${{ hashFiles('r/src/rust/Cargo.lock', 'r/src/rust/Cargo.toml', 'core/Cargo.toml', 'r/src/Makevars*.in', 'r/tools/config.R') }}
+          key: cargo-r-v2-${{ runner.os }}-${{ runner.arch }}-release-${{ steps.cargo.outputs.key }}-${{ hashFiles('r/src/rust/Cargo.lock', 'r/src/rust/Cargo.toml', 'core/Cargo.toml', 'r/src/Makevars*.in', 'r/src/Makevars.common', 'r/tools/config.R') }}-${{ hashFiles('core/**/*.rs', 'r/src/**/*.rs', 'r/src/**/*.c', 'r/src/**/*.h', '!**/*[sS][aA][gG][aA]*', '!**/*[sS][aA][gG][aA]*/**', '!**/.local/**', '!**/.aws/**', '!**/target/**', '!**/.venv/**', '!**/node_modules/**') }}
+          restore-keys: cargo-r-v2-${{ runner.os }}-${{ runner.arch }}-release-${{ steps.cargo.outputs.key }}-${{ hashFiles('r/src/rust/Cargo.lock', 'r/src/rust/Cargo.toml', 'core/Cargo.toml', 'r/src/Makevars*.in', 'r/src/Makevars.common', 'r/tools/config.R') }}-
 
       - name: Check the source tarball
         shell: Rscript {0}
         run: |
           tarball <- Sys.glob("ckdata_*.tar.gz")
           rcmdcheck::rcmdcheck(tarball, args = "--no-manual", error_on = "warning", check_dir = "check")
+
+      - name: Check for R Cargo cache data
+        id: cache-data
+        if: ${{ (success() || failure()) && steps.cache.outputs.cache-primary-key != '' && steps.cache.outputs.cache-hit != 'true' }}
+        shell: Rscript {0}
+        run: |
+          paths <- file.path(Sys.getenv("RUNNER_TEMP"), "ckdata-cargo", c("home/registry", "home/git", "target"))
+          if (any(dir.exists(paths))) {
+            cat("exists=true\n", file = Sys.getenv("GITHUB_OUTPUT"), append = TRUE)
+          }
+      - name: Save R's Cargo downloads and builds
+        if: ${{ (success() || failure()) && steps.cache-data.outputs.exists == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/ckdata-cargo/home/registry
+            ${{ runner.temp }}/ckdata-cargo/home/git
+            ${{ runner.temp }}/ckdata-cargo/target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   # A job skipped because one it needs failed reports skipped, which a required check accepts, so
   # this asserts success itself.

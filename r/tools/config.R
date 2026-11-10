@@ -1,8 +1,7 @@
 # Note: Any variables prefixed with `.` are used for text
 # replacement in the Makevars.in and Makevars.win.in
 
-# check the packages MSRV first
-source("tools/msrv.R")
+# Cargo enforces the rust-version declared in the Rust manifests.
 
 # check DEBUG and NOT_CRAN environment variables
 env_debug <- Sys.getenv("DEBUG")
@@ -36,7 +35,11 @@ if (!is_not_cran) {
 # when DEBUG env var is present we use `--debug` build
 .profile <- ifelse(is_debug, "", "--release")
 # An explicit Cargo target directory belongs to the caller, outside the package's cleanup.
-.clean_targets <- ifelse(is_debug || nzchar(Sys.getenv("CARGO_TARGET_DIR")), '', '"$(TARGET_DIR)"')
+.clean_targets <- ifelse(
+  is_debug || nzchar(Sys.getenv("CARGO_TARGET_DIR")),
+  "",
+  '"$(TARGET_DIR)"'
+)
 
 # We specify this target when building for webR
 webr_target <- "wasm32-unknown-emscripten"
@@ -75,15 +78,30 @@ cfg <- if (is_debug) "debug" else "release"
 # target (R-universe does). Otherwise rustc, the C compiler and the linker each pick their own,
 # and the linker's warnings about newer objects fail R CMD check.
 .macos_target <- ""
-if (Sys.info()[["sysname"]] == "Darwin" && !nzchar(Sys.getenv("MACOSX_DEPLOYMENT_TARGET"))) {
+if (
+  Sys.info()[["sysname"]] == "Darwin" &&
+    !nzchar(Sys.getenv("MACOSX_DEPLOYMENT_TARGET"))
+) {
   load_commands <- tryCatch(
-    system2("otool", c("-l", shQuote(file.path(R.home("lib"), "libR.dylib"))), stdout = TRUE, stderr = FALSE),
+    system2(
+      "otool",
+      c("-l", shQuote(file.path(R.home("lib"), "libR.dylib"))),
+      stdout = TRUE,
+      stderr = FALSE
+    ),
     error = function(e) character()
   )
   minos <- grep("^[[:space:]]*minos[[:space:]]", load_commands, value = TRUE)
   if (length(minos) > 0) {
-    .macos_target <- paste("export MACOSX_DEPLOYMENT_TARGET =", sub("^[[:space:]]*minos[[:space:]]+", "", minos[1]))
-    message("Targeting macOS ", sub("^export MACOSX_DEPLOYMENT_TARGET = ", "", .macos_target), ", R's own minimum.")
+    .macos_target <- paste(
+      "export MACOSX_DEPLOYMENT_TARGET =",
+      sub("^[[:space:]]*minos[[:space:]]+", "", minos[1])
+    )
+    message(
+      "Targeting macOS ",
+      sub("^export MACOSX_DEPLOYMENT_TARGET = ", "", .macos_target),
+      ", R's own minimum."
+    )
   }
 }
 

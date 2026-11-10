@@ -1,4 +1,6 @@
-"""The core's literal probe reaches Polars, pyarrow, pandas and DuckDB unchanged."""
+"""An offline Rust Arrow fixture reaches the supported Python frame libraries."""
+
+from datetime import datetime
 
 import ckdata
 import duckdb
@@ -7,20 +9,51 @@ import polars as pl
 import pyarrow as pa
 
 
-def test_handoff_reaches_every_frame_library():
-    assert isinstance(pa.table(ckdata._arrow_probe()), pa.Table)
-    assert isinstance(pd.DataFrame.from_arrow(ckdata._arrow_probe()), pd.DataFrame)
-    r = ckdata._arrow_probe()  # noqa: F841 - DuckDB's replacement scan reads it by name
-    assert duckdb.sql("select count(*) from r").fetchall() == [(2,)]
-    df = pl.DataFrame(ckdata._arrow_probe()).sort("id")
-    assert df["s_null"][0] is None, "a NULL string must stay NULL"
-    assert df["s_empty"][0] == "", "an empty string must stay empty"
-    assert df["big"][0] == 9007199254740993, (
-        "a 64-bit integer past 2^53 must stay exact"
+def test_arrow_handoff_preserves_values_across_frame_libraries():
+    expected_rows = [
+        {
+            "id": 1,
+            "s_null": None,
+            "s_empty": "",
+            "big": 9007199254740993,
+            "ts": datetime(2026, 10, 16, 12, 34, 56, 789000),
+        },
+        {"id": 2, "s_null": "a", "s_empty": "b", "big": None, "ts": None},
+    ]
+    expected_types = {
+        "id": pa.int32(),
+        "s_null": pa.string(),
+        "s_empty": pa.string(),
+        "big": pa.int64(),
+        "ts": pa.timestamp("ms"),
+    }
+    table = pa.table(ckdata._arrow_fixture()).sort_by("id")
+    assert table.to_pylist() == expected_rows
+    assert {field.name: field.type for field in table.schema} == expected_types
+
+    frame = (
+        pa.table(ckdata._arrow_fixture())
+        .to_pandas(types_mapper=pd.ArrowDtype)
+        .sort_values("id")
     )
-    assert str(df.schema["ts"]) == "Datetime(time_unit='ms', time_zone=None)", (
-        df.schema["ts"]
+    expected_frame = pd.DataFrame(
+        {
+            name: pd.array(
+                [row[name] for row in expected_rows], dtype=pd.ArrowDtype(dtype)
+            )
+            for name, dtype in expected_types.items()
+        }
     )
+    pd.testing.assert_frame_equal(frame, expected_frame)
+
+    r = ckdata._arrow_fixture()  # noqa: F841 - DuckDB's replacement scan reads it by name
+    assert duckdb.sql(
+        "select id, s_null, s_empty, big, ts from r order by id"
+    ).fetchall() == [tuple(row.values()) for row in expected_rows]
+
+    df = pl.DataFrame(ckdata._arrow_fixture()).sort("id")
+    assert df.to_dicts() == expected_rows
+    assert df.schema["ts"] == pl.Datetime("ms")
 
 
 def test_version_matches_core():

@@ -5,6 +5,15 @@ pub(crate) struct S3Location {
 }
 
 impl S3Location {
+    pub(crate) fn prefix(location: &str) -> Option<String> {
+        let prefix = if location.ends_with('/') {
+            location.to_owned()
+        } else {
+            format!("{location}/")
+        };
+        Self::parse(&prefix).map(|_| prefix)
+    }
+
     pub(crate) fn parse(location: &str) -> Option<Self> {
         let (bucket, key) = location.strip_prefix("s3://")?.split_once('/')?;
         if !(3..=63).contains(&bucket.len())

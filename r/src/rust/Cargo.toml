@@ -17,13 +17,14 @@ path = 'document.rs'
 [dependencies]
 extendr-api = '0.9.0'
 extendr-ffi = '0.9.0'
-arrow-array = { version = '59', features = ['ffi'] }
+arrow-array = { version = '60', features = ['ffi'] }
+arrow-schema = '60'
+tokio = { version = '1', features = ['rt-multi-thread', 'time', 'sync'] }
 # A symlink to the repository's core/, which R CMD build copies into the source tarball.
 ckdata = { path = 'core' }
 
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"
 
 # Its own workspace, so it builds the same inside the repository and inside a source tarball.
 [workspace]

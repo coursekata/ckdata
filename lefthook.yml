@@ -1,0 +1,13 @@
+# Developer commands live in justfile. Only Git-specific behavior belongs here.
+min_version: 2.2.2
+pre-commit:
+  piped: true
+  jobs:
+    - name: formatting
+      run: uv run --locked just fmt --check
+    - name: staged-secrets
+      run: uv run --locked python scripts/repo-files.py secrets
+pre-push:
+  jobs:
+    - name: local-checks
+      run: uv run --locked just check

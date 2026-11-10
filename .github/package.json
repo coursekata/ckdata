@@ -1,0 +1,18 @@
+{
+  "name": "ckdata-repository-tools",
+  "private": true,
+  "scripts": {
+    "validate": "renovate-config-validator ../renovate.json"
+  },
+  "devDependencies": {
+    "node": "^24.11.0",
+    "renovate": "44.206.2"
+  },
+  "allowScripts": {
+    "node": true,
+    "re2": true,
+    "protobufjs": false,
+    "core-js-pure": false,
+    "dtrace-provider": false
+  }
+}

@@ -1,97 +1,62 @@
 # ckdata
 
-ckdata is being rebuilt around a Rust core shared by its R and Python packages. The core connects to Athena and reads Parquet results into Arrow. The R and Python query bindings are still in development.
+Query Amazon Athena from R or Python. ckdata runs read-only SQL
+queries and brings Parquet results into your analysis through Apache Arrow.
 
-## Status
+In R, use dplyr and dbplyr to build lazy queries, or use SQL through DBI. In
+Python, use SQL and consume results with PyArrow, pandas, Polars or DuckDB.
+Both packages share the same Rust query engine.
 
-This is a development build. The packages build, install and pass their checks, but they run no query yet and have not been published. To query the lake today, use [ckdata-r](https://github.com/coursekata/ckdata-r). The first public R release will follow a working query API and passing package tests. Python wheels and PyPI publication follow full Python package testing.
+## Installation and configuration
 
-The Rust core supports standard AWS connection settings, a fixed-lifetime assumed role and table/column discovery through Athena's metadata APIs. Queries use UNLOAD with a fresh workgroup output prefix and support cancellation. The core retrieves file paths through Athena's paginated manifest API and reads the files with the upstream Parquet reader. Athena writes UNLOAD files in parallel, so combined row order is not guaranteed, even with `ORDER BY`. Tests use invented configuration and mocked HTTP services.
+Follow the [installation and setup guide](docs/installation.md) for package
+availability, installation and AWS configuration. R can open your configured
+AWS SSO sign-in in the browser when the first connection needs it.
 
-## Install
+### R
 
-For the working R package, follow the installation instructions in [ckdata-r](https://github.com/coursekata/ckdata-r). This rewrite is not available from CourseKata's R-universe. Its binary-install instructions will be added with the first usable R release.
+With your CourseKata source configured, a summary query looks like:
 
-## Layout
+```r
+library(ckdata)
+library(dplyr)
 
-| Path | What it holds |
-|---|---|
-| `core/` | The Rust core, the crate `ckdata` |
-| `r/` | The R package, an extendr package. Its crate, `ckdata-r`, reaches the core through the symlink `r/src/rust/core`, which `R CMD build` copies into the source tarball |
-| `python/` | The Python binding, the PyO3 crate `ckdata-py`, built with maturin into the module `ckdata` |
+query <- lake_tbl("mart_classes") |> count()
 
-## Developing
+show_query(query)  # Inspect the SQL
+collect(query)     # Run it and retrieve a tibble
 
-Run these commands from the repository root. Install [Rust through rustup](https://rustup.rs), R 4.2 or later with devtools and rextendr, [uv](https://docs.astral.sh/uv/getting-started/installation/), and [Gitleaks](https://github.com/gitleaks/gitleaks#installing). Gitleaks must be on PATH: the system hook uses your installed executable. Python tests need Python 3.11 or later, which uv can provide.
-
-```sh
-uv tool install prek==0.5.9
-prek install
+# Or write SQL directly
+lake_query("SELECT 1 AS example")
 ```
 
-The hooks check formatting on commits and run Clippy and all Rust targets on pushes, including dependency-only changes. CI repeats these checks. [Dependency maintenance](.github/dependency_policy.md) records update ownership and upstream constraints.
+Use `collect_saved()` to reuse a local Parquet result until the source refreshes,
+or keep an indefinite snapshot for reproducibility. See the
+[usage guide](docs/usage.md#saved-results).
 
-```sh
-cargo test --workspace --all-targets --locked --exclude ckdata-py
+### Python
+
+```python
+import ckdata
+import pandas as pd
+import pyarrow as pa
+
+result = pa.table(ckdata.query("SELECT 1 AS example"))
+frame = result.to_pandas(types_mapper=pd.ArrowDtype)
 ```
 
-```sh
-Rscript -e 'devtools::test("r")'
-```
+Empty results retain their column types. Results do not guarantee row order
+across Athena's output files; sort after retrieval when local order matters.
 
-`Rscript -e 'devtools::document("r")'` regenerates R documentation and wrappers after an exported function changes.
+## Documentation
 
-The [query integration harness](tests/README.md) checks the Athena/Parquet result path against separately provisioned, entirely invented fixtures. The Rust acceptance example runs the implemented reader through both test roles. Its help and ordinary Rust tests are offline; live checks require an explicit flag and the deployment contract from ck-datalake's `environments/ckdata-test` root.
+- [Installation and configuration](docs/installation.md)
+- [Usage, saved results and query behavior](docs/usage.md)
+- [Internal researcher runbook](docs/researcher-walkthrough.md)
+- [QA walkthrough with synthetic data](docs/qa-walkthrough.md)
+- [Development and repository structure](docs/development.md)
+- [Testing](tests/README.md)
+- [Releasing](docs/releasing.md)
 
-```sh
-cargo run -p ckdata --example query_acceptance -- --help
-cargo run -p ckdata --example query_acceptance -- \
-  --deployment /absolute/path/to/ckdata-test-deployment.json --run-live
-```
-
-AWS profiles and region follow standard SDK configuration; `--profile` selects a source profile. The core's `Connection::query` accepts SQL, `QueryOptions` and a `QueryCancellation` token, and returns owned Arrow batches through `QueryResult`. Signal cancellation and keep awaiting the query so the client can request a remote stop. The library installs no global Ctrl-C handler.
-
-The core wraps your SQL in UNLOAD after trimming whitespace and one trailing semicolon. Athena validates the SQL. Every successful `QueryResult` has a Parquet-derived `SchemaRef` and an Arrow reader, including empty results. If Athena writes no files, the core runs one schema-only UNLOAD, reads its Parquet schema and returns zero rows. Recovery shares the original timeout and cancellation signal; failures retain the original query ID and the recovery error. A zero-row Parquet file already has a schema and needs no recovery.
-
-UNLOAD does not guarantee combined row order across files, even with `ORDER BY`. The core does not sort results; callers needing local order must sort after retrieval.
-
-`into_reader_with_warnings()` returns the reader together with the query warnings. Hosts must present `SessionExpiring` warnings during the last fifteen minutes of an explicit role lease.
-
-The repository has one Python development environment, declared in `pyproject.toml`
-and resolved in `uv.lock`. It covers tooling, the AWS probe and Python binding
-tests. uv creates the environment without an activation step.
-
-```sh
-uv sync --locked
-uv run --locked pytest
-```
-
-This runs every Python tooling test under `tests/`, including the small R build
-fixtures. Run `uv run --locked pytest tests/unit` for the fast checks without R
-or a Rust build. [Testing](tests/README.md) describes the layout and live probe.
-
-To build the Python binding and run its handoff tests in the same environment:
-
-```sh
-uv run --locked --group bindings --all-packages pytest python/tests
-```
-
-On Windows, git checks the core's symlink out as a text file unless symlinks are enabled. Turn on Developer Mode, then clone with `git clone -c core.symlinks=true`.
-
-## Releasing
-
-Publish the first R release only after its query API works and its package tests pass. Publication is disabled by `R_RELEASE_READY` in the release workflow. Enable it in the reviewed first-release change, and add the package to the CourseKata R-universe registry with `subdir: r` and `branch: "*release"`. The tagged commit must also have successful main-branch CI.
-
-1. In one pull request, set the new version in `core/Cargo.toml`, `python/Cargo.toml`, `r/src/rust/Cargo.toml` and `r/DESCRIPTION`, and merge it.
-2. Tag the merge commit with a lightweight tag and push it: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
-3. The release workflow checks that the tag matches all four versions and sits on `main`, then creates the GitHub release.
-4. R-universe builds the R binaries from that release. The release workflow waits for them, then installs each on Linux, macOS and Windows with no Rust present and runs the package's tests. `verify_release` runs that check again by hand.
-
-A release tag is never moved. A fix is a new version.
-
-License notices ship with both packages. After changing a Cargo lock, run
-`python3 scripts/check_licenses.py --write`; CI rejects stale notices. Before
-building a release with a different Rust compiler, run
-`python3 scripts/check_licenses.py --runtime-write --write` and review the
-compiler provenance and license diff. `--archive /absolute/path/to/package`
-checks the exact notices carried by a wheel, Python source archive or R tarball.
+R function reference is available through `help(package = "ckdata")`.
+ckdata is licensed under the [MIT license](LICENSE).

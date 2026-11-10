@@ -33,12 +33,11 @@ impl Connection {
     pub async fn workgroup_configuration(
         &self,
     ) -> Result<aws_sdk_athena::types::WorkGroupConfiguration, Error> {
-        self.session_status()?;
         let client = aws_sdk_athena::Client::from_conf(
             aws_sdk_athena::config::Builder::from(self.aws_config())
                 .timeout_config(
                     aws_sdk_athena::config::timeout::TimeoutConfig::builder()
-                        .operation_timeout(std::time::Duration::from_secs(10))
+                        .operation_timeout(self.request_timeout(std::time::Duration::from_secs(10)))
                         .build(),
                 )
                 .build(),
@@ -69,7 +68,6 @@ impl Connection {
 
     /// Discover table metadata without submitting a query or fetching result rows.
     pub async fn table_page(&self, next_token: Option<&str>) -> Result<TablePage, Error> {
-        self.session_status()?;
         let response = aws_sdk_athena::Client::new(self.aws_config())
             .list_table_metadata()
             .catalog_name(CATALOG)
@@ -103,7 +101,6 @@ impl Connection {
         if table.trim().is_empty() || table.chars().any(char::is_control) {
             return Err(Error::InvalidSetting("table"));
         }
-        self.session_status()?;
         let response = aws_sdk_athena::Client::new(self.aws_config())
             .get_table_metadata()
             .catalog_name(CATALOG)

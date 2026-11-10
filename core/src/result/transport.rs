@@ -77,7 +77,7 @@ pub(super) async fn manifest(
         aws_sdk_athena::config::Builder::from(connection.aws_config())
             .timeout_config(
                 aws_sdk_athena::config::timeout::TimeoutConfig::builder()
-                    .operation_timeout(REQUEST_TIMEOUT)
+                    .operation_timeout(guard.request_timeout(REQUEST_TIMEOUT))
                     .build(),
             )
             .build(),
@@ -163,7 +163,7 @@ async fn object(
         aws_sdk_s3::config::Builder::from(connection.aws_config())
             .timeout_config(
                 TimeoutConfig::builder()
-                    .operation_timeout(REQUEST_TIMEOUT)
+                    .operation_timeout(guard.request_timeout(REQUEST_TIMEOUT))
                     .build(),
             )
             .build(),

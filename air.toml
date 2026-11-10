@@ -1,0 +1,8 @@
+[format]
+exclude = [
+  "**/*[sS][aA][gG][aA]*/**",
+  ".local/**",
+  "target/**",
+  "r/src/**",
+  "r/R/extendr-wrappers.R",
+]

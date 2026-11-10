@@ -76,48 +76,50 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def selected_licenses(expression):
-    """Choose an allowed branch of an SPDX expression; preserve every AND term."""
-    tokens = re.findall(r"\(|\)|[^\s()]+", expression.replace("/", " OR "))
-    position = 0
+class _LicenseExpression:
+    """Read the existing SPDX subset with AND precedence over OR."""
 
-    def atom():
-        nonlocal position
-        if position >= len(tokens):
-            raise ValueError(f"Incomplete license expression: {expression}")
-        token = tokens[position]
-        position += 1
+    def __init__(self, expression):
+        self.expression = expression
+        self.tokens = re.findall(r"\(|\)|[^\s()]+", expression.replace("/", " OR "))
+        self.position = 0
+
+    def take(self, token):
+        if self.position < len(self.tokens) and self.tokens[self.position] == token:
+            self.position += 1
+            return True
+        return False
+
+    def atom(self):
+        if self.position >= len(self.tokens):
+            raise ValueError(f"Incomplete license expression: {self.expression}")
+        token = self.tokens[self.position]
+        self.position += 1
         if token == "(":
-            value = either()
-            if position >= len(tokens) or tokens[position] != ")":
-                raise ValueError(f"Unbalanced license expression: {expression}")
-            position += 1
+            value = self.either()
+            if not self.take(")"):
+                raise ValueError(f"Unbalanced license expression: {self.expression}")
             return value
         if token in {"AND", "OR", ")", "WITH"}:
-            raise ValueError(f"Invalid license expression: {expression}")
-        if position < len(tokens) and tokens[position] == "WITH":
-            position += 1
-            if position >= len(tokens):
-                raise ValueError(f"Missing license exception: {expression}")
-            token += " WITH " + tokens[position]
-            position += 1
+            raise ValueError(f"Invalid license expression: {self.expression}")
+        if self.take("WITH"):
+            if self.position >= len(self.tokens):
+                raise ValueError(f"Missing license exception: {self.expression}")
+            token += " WITH " + self.tokens[self.position]
+            self.position += 1
         return {token} if token in PREFERENCE else None
 
-    def both():
-        nonlocal position
-        value = atom()
-        while position < len(tokens) and tokens[position] == "AND":
-            position += 1
-            other = atom()
+    def both(self):
+        value = self.atom()
+        while self.take("AND"):
+            other = self.atom()
             value = value | other if value is not None and other is not None else None
         return value
 
-    def either():
-        nonlocal position
-        choices = [both()]
-        while position < len(tokens) and tokens[position] == "OR":
-            position += 1
-            choices.append(both())
+    def either(self):
+        choices = [self.both()]
+        while self.take("OR"):
+            choices.append(self.both())
         choices = [value for value in choices if value is not None]
         return (
             min(
@@ -131,8 +133,12 @@ def selected_licenses(expression):
             else None
         )
 
-    value = either()
-    if position != len(tokens) or value is None:
+
+def selected_licenses(expression):
+    """Choose an allowed branch of an SPDX expression; preserve every AND term."""
+    parser = _LicenseExpression(expression)
+    value = parser.either()
+    if parser.position != len(parser.tokens) or value is None:
         raise ValueError(f"No reviewed permissive option: {expression}")
     return sorted(value)
 
@@ -183,15 +189,27 @@ def preamble(text):
     )
 
 
-def package_texts(package, supplements):
-    root = Path(package["manifest_path"]).parent.resolve()
-    # Cargo's registry packages are the only trees this script may inspect.
-    if (
-        not package["source"].startswith("registry+")
-        or "registry" not in root.parts
-        or "src" not in root.parts
-    ):
-        raise ValueError(f"Unsupported dependency source: {package['name']}")
+def _read_package_text(path, root, package_name, in_license_directory):
+    if not path.is_file() or not path.resolve().is_relative_to(root):
+        return None
+    is_notice = path.name.lower().startswith(PREFIXES) or in_license_directory
+    if not is_notice and path.suffix.lower() not in SOURCE_SUFFIXES:
+        return None
+    relative = path.relative_to(root).as_posix()
+    try:
+        content = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        if is_notice:
+            raise ValueError(f"Non-UTF-8 notice: {package_name}/{relative}")
+        return None
+    if is_notice:
+        return relative, content
+    header = preamble(content)
+    return (relative + " (source preamble)", header) if header else None
+
+
+def _registry_texts(root, package_name):
+    """Collect notices and source headers without following paths out of the crate."""
     texts = {}
     for parent, directories, files in os.walk(root, followlinks=False):
         directories[:] = sorted(
@@ -205,59 +223,69 @@ def package_texts(package, supplements):
             for part in parent.relative_to(root).parts
         )
         for name in sorted(files):
-            path = parent / name
-            relative = str(path.relative_to(root))
-            if not path.is_file() or not path.resolve().is_relative_to(root):
-                continue
-            is_notice = name.lower().startswith(PREFIXES) or in_license_directory
-            if not is_notice and path.suffix.lower() not in SOURCE_SUFFIXES:
-                continue
-            try:
-                raw = path.read_bytes()
-                content = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                if is_notice:
-                    raise ValueError(f"Non-UTF-8 notice: {package['name']}/{relative}")
-                continue
-            if is_notice:
+            notice = _read_package_text(
+                parent / name, root, package_name, in_license_directory
+            )
+            if notice:
+                relative, content = notice
                 texts[relative] = content
-            else:
-                header = preamble(content)
-                if header:
-                    texts[relative + " (source preamble)"] = header
-    license_file = package.get("license_file")
-    if license_file:
-        path = Path(license_file).resolve()
-        if not path.is_relative_to(root):
-            raise ValueError(f"License file escapes registry crate: {package['name']}")
-        texts[str(path.relative_to(root))] = path.read_text(encoding="utf-8")
+    return texts
+
+
+def _supplement_texts(package, root, supplements):
+    """Verify upstream revision and snapshot hashes before including omitted files."""
     key = package["name"] + "@" + package["version"]
     supplement = supplements.get(key)
-    if supplement:
-        vcs = json.loads((root / ".cargo_vcs_info.json").read_text())
-        if vcs["git"]["sha1"] != supplement["revision"]:
-            raise ValueError(f"Upstream revision changed: {key}")
-        for record in supplement["files"]:
-            data = (SUPPLEMENTS.parent / record["file"]).read_bytes()
-            if digest(data) != record["sha256"]:
-                raise ValueError(f"Upstream snapshot changed: {record['file']}")
-            texts["upstream: " + record["url"]] = data.decode("utf-8")
+    if not supplement:
+        return {}
+    vcs = json.loads((root / ".cargo_vcs_info.json").read_text())
+    if vcs["git"]["sha1"] != supplement["revision"]:
+        raise ValueError(f"Upstream revision changed: {key}")
+    texts = {}
+    for record in supplement["files"]:
+        data = (SUPPLEMENTS.parent / record["file"]).read_bytes()
+        if digest(data) != record["sha256"]:
+            raise ValueError(f"Upstream snapshot changed: {record['file']}")
+        texts["upstream: " + record["url"]] = data.decode("utf-8")
+    return texts
+
+
+def _is_license_text(name, content):
     # A copyright preamble alone cannot substitute for a complete license.
-    license_prefixes = ("license", "licence", "copying")
-    if not any(
-        content.strip()
+    return (
+        bool(content.strip())
         and " (source preamble)" not in name
         and (
             name.startswith("upstream: ")
-            or Path(name).name.lower().startswith(license_prefixes)
+            or Path(name).name.lower().startswith(("license", "licence", "copying"))
             or any(
                 part.lower() in {"licenses", "licences"} for part in Path(name).parts
             )
             # r-efi intentionally carries its full MIT grant in AUTHORS.
             or "Permission is hereby granted, free of charge" in content
         )
-        for name, content in texts.items()
+    )
+
+
+def package_texts(package, supplements):
+    root = Path(package["manifest_path"]).parent.resolve()
+    # Cargo's registry packages are the only trees this script may inspect.
+    if (
+        not package["source"].startswith("registry+")
+        or "registry" not in root.parts
+        or "src" not in root.parts
     ):
+        raise ValueError(f"Unsupported dependency source: {package['name']}")
+    texts = _registry_texts(root, package["name"])
+    license_file = package.get("license_file")
+    if license_file:
+        path = Path(license_file).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError(f"License file escapes registry crate: {package['name']}")
+        texts[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
+    texts.update(_supplement_texts(package, root, supplements))
+    if not any(_is_license_text(name, content) for name, content in texts.items()):
+        key = package["name"] + "@" + package["version"]
         raise ValueError(
             f"Missing license text for {key}; add an exact-revision upstream snapshot"
         )
@@ -396,62 +424,70 @@ def expected_files():
     }
 
 
+def _check_wheel_licenses(path, expected):
+    with zipfile.ZipFile(path) as archive:
+        members = archive.namelist()
+        matches = [name for name in members if name.endswith(".dist-info/METADATA")]
+        if len(matches) != 1:
+            raise ValueError(f"Unexpected wheel metadata: {path}")
+        metadata_text = archive.read(matches[0]).decode("utf-8")
+        if "License-Expression: MIT\n" not in metadata_text:
+            raise ValueError("Wheel lacks MIT license expression")
+        prefix = matches[0].removesuffix("METADATA") + "licenses/"
+        for name in (
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.txt",
+            "RUST_RUNTIME_NOTICES.html",
+        ):
+            if (
+                f"License-File: {name}\n" not in metadata_text
+                or archive.read(prefix + name) != expected["python/" + name]
+            ):
+                raise ValueError(f"Missing or stale wheel license: {name}")
+
+
+def _check_tarball_licenses(path, expected):
+    with tarfile.open(path, "r:gz") as archive:
+        members = {member.name: member for member in archive.getmembers()}
+        roots = {name.split("/", 1)[0] for name in members}
+        if len(roots) != 1:
+            raise ValueError(f"Unexpected archive roots: {path}")
+        prefix = next(iter(roots)) + "/"
+        is_r = prefix + "DESCRIPTION" in members
+        required = (
+            {
+                "inst/LICENSE-MIT": "r/inst/LICENSE-MIT",
+                "inst/THIRD_PARTY_NOTICES.txt": "r/inst/THIRD_PARTY_NOTICES.txt",
+                "inst/RUST_RUNTIME_NOTICES.html": "r/inst/RUST_RUNTIME_NOTICES.html",
+            }
+            if is_r
+            else {
+                "python/LICENSE": "python/LICENSE",
+                "python/THIRD_PARTY_NOTICES.txt": "python/THIRD_PARTY_NOTICES.txt",
+                "python/RUST_RUNTIME_NOTICES.html": "python/RUST_RUNTIME_NOTICES.html",
+            }
+        )
+        for member_name, expected_name in required.items():
+            member = members.get(prefix + member_name)
+            if (
+                member is None
+                or not member.isfile()
+                or archive.extractfile(member).read() != expected[expected_name]
+            ):
+                raise ValueError(f"Missing or stale archive license: {member_name}")
+        if not is_r:
+            package_info = (
+                archive.extractfile(prefix + "PKG-INFO").read().decode("utf-8")
+            )
+            if "License-Expression: MIT\n" not in package_info:
+                raise ValueError("sdist lacks MIT license expression")
+
+
 def check_archive(path, expected):
     if path.suffix == ".whl":
-        with zipfile.ZipFile(path) as archive:
-            members = archive.namelist()
-            matches = [name for name in members if name.endswith(".dist-info/METADATA")]
-            if len(matches) != 1:
-                raise ValueError(f"Unexpected wheel metadata: {path}")
-            metadata_text = archive.read(matches[0]).decode("utf-8")
-            if "License-Expression: MIT\n" not in metadata_text:
-                raise ValueError("Wheel lacks MIT license expression")
-            prefix = matches[0].removesuffix("METADATA") + "licenses/"
-            for name in (
-                "LICENSE",
-                "THIRD_PARTY_NOTICES.txt",
-                "RUST_RUNTIME_NOTICES.html",
-            ):
-                if (
-                    f"License-File: {name}\n" not in metadata_text
-                    or archive.read(prefix + name) != expected["python/" + name]
-                ):
-                    raise ValueError(f"Missing or stale wheel license: {name}")
+        _check_wheel_licenses(path, expected)
     else:
-        with tarfile.open(path, "r:gz") as archive:
-            members = {member.name: member for member in archive.getmembers()}
-            roots = {name.split("/", 1)[0] for name in members}
-            if len(roots) != 1:
-                raise ValueError(f"Unexpected archive roots: {path}")
-            prefix = next(iter(roots)) + "/"
-            is_r = prefix + "DESCRIPTION" in members
-            required = (
-                {
-                    "inst/LICENSE-MIT": "r/inst/LICENSE-MIT",
-                    "inst/THIRD_PARTY_NOTICES.txt": "r/inst/THIRD_PARTY_NOTICES.txt",
-                    "inst/RUST_RUNTIME_NOTICES.html": "r/inst/RUST_RUNTIME_NOTICES.html",
-                }
-                if is_r
-                else {
-                    "python/LICENSE": "python/LICENSE",
-                    "python/THIRD_PARTY_NOTICES.txt": "python/THIRD_PARTY_NOTICES.txt",
-                    "python/RUST_RUNTIME_NOTICES.html": "python/RUST_RUNTIME_NOTICES.html",
-                }
-            )
-            for member_name, expected_name in required.items():
-                member = members.get(prefix + member_name)
-                if (
-                    member is None
-                    or not member.isfile()
-                    or archive.extractfile(member).read() != expected[expected_name]
-                ):
-                    raise ValueError(f"Missing or stale archive license: {member_name}")
-            if not is_r:
-                package_info = (
-                    archive.extractfile(prefix + "PKG-INFO").read().decode("utf-8")
-                )
-                if "License-Expression: MIT\n" not in package_info:
-                    raise ValueError("sdist lacks MIT license expression")
+        _check_tarball_licenses(path, expected)
     print(f"License archive check passed: {path}")
 
 

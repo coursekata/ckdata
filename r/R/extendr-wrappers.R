@@ -9,8 +9,76 @@ NULL
 #' @noRd
 core_versions <- function() .Call(wrap__core_versions)
 
-#' Create an owned nanoarrow stream containing the core's literal probe.
 #' @noRd
-arrow_probe_stream <- function() .Call(wrap__arrow_probe_stream)
+native_connect <- function(settings, login_allowed) .Call(wrap__native_connect, settings, login_allowed)
+
+#' @noRd
+native_ready <- function(object) .Call(wrap__native_ready, object)
+
+#' @noRd
+native_cancel <- function(object) .Call(wrap__native_cancel, object)
+
+#' @noRd
+native_login_target <- function(object) .Call(wrap__native_login_target, object)
+
+#' @noRd
+native_login_complete <- function(object, success) .Call(wrap__native_login_complete, object, success)
+
+#' @noRd
+native_job_value <- function(object) .Call(wrap__native_job_value, object)
+
+#' @noRd
+native_connection_info <- function(object) .Call(wrap__native_connection_info, object)
+
+#' @noRd
+native_disconnect <- function(object) .Call(wrap__native_disconnect, object)
+
+#' Drain cancellation before the package's worker runtime is released. Called
+#' from R's unload hook on the R thread, never from a Tokio worker.
+#' @noRd
+native_shutdown <- function() .Call(wrap__native_shutdown)
+
+#' @noRd
+native_query <- function(object, sql, timeout, parameters, schema_only) .Call(wrap__native_query, object, sql, timeout, parameters, schema_only)
+
+#' @noRd
+native_metadata <- function(object, schema, table) .Call(wrap__native_metadata, object, schema, table)
+
+#' Inspect workgroup metadata for acceptance preflight without submitting SQL.
+#' @noRd
+native_workgroup <- function(object) .Call(wrap__native_workgroup, object)
+
+#' @noRd
+native_result_fetch <- function(object, n) .Call(wrap__native_result_fetch, object, n)
+
+#' @noRd
+native_result_info <- function(object) .Call(wrap__native_result_info, object)
+
+#' @noRd
+native_result_clear <- function(object) .Call(wrap__native_result_clear, object)
+
+#' Concatenate vectorized parameter results without converting Arrow values.
+#' @noRd
+native_result_append <- function(object, other) .Call(wrap__native_result_append, object, other)
+
+#' Native result fixture. Entirely offline, with the same cursor as AWS results.
+#' @noRd
+native_probe_result <- function(empty) .Call(wrap__native_probe_result, empty)
+
+#' Offline workgroup fixture using the same R conversion as live metadata.
+#' @noRd
+native_probe_workgroup <- function() .Call(wrap__native_probe_workgroup)
+
+#' Offline table fixture, including a partition key, through live metadata conversion.
+#' @noRd
+native_probe_metadata <- function() .Call(wrap__native_probe_metadata)
+
+#' Offline asynchronous fixture for interrupt and task-lifetime tests.
+#' @noRd
+native_probe_job <- function(milliseconds) .Call(wrap__native_probe_job, milliseconds)
+
+#' Offline sign-in metadata through the same conversion as pending jobs and errors.
+#' @noRd
+native_probe_login_targets <- function() .Call(wrap__native_probe_login_targets)
 
 # nolint end

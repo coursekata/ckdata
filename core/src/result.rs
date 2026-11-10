@@ -9,12 +9,6 @@ use crate::{Connection, Error, QueryCancellation, QueryInterruption, QueryOption
 mod decode;
 pub(crate) mod transport;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum QueryWarning {
-    /// Hosts should display this before presenting the next result.
-    SessionExpiring { remaining: std::time::Duration },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ResultError {
     #[error("invalid manifest: {0}")]
@@ -36,7 +30,6 @@ pub struct QueryResult {
     query_id: String,
     schema: SchemaRef,
     batches: Vec<RecordBatch>,
-    warnings: Vec<QueryWarning>,
 }
 
 impl std::fmt::Debug for QueryResult {
@@ -46,7 +39,6 @@ impl std::fmt::Debug for QueryResult {
             .field("query_id", &self.query_id)
             .field("schema", &self.schema)
             .field("row_count", &self.row_count())
-            .field("warnings", &self.warnings)
             .finish_non_exhaustive()
     }
 }
@@ -61,21 +53,12 @@ impl QueryResult {
     pub fn batches(&self) -> &[RecordBatch] {
         &self.batches
     }
-    pub fn warnings(&self) -> &[QueryWarning] {
-        &self.warnings
-    }
     pub fn row_count(&self) -> usize {
         self.batches.iter().map(RecordBatch::num_rows).sum()
     }
-    /// Transfer the Arrow data and schema. Read warnings first, or use
-    /// into_reader_with_warnings to retain them alongside the reader.
+    /// Transfer the Arrow data and schema.
     pub fn into_reader(self) -> impl RecordBatchReader + Send {
         RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema)
-    }
-    pub fn into_reader_with_warnings(self) -> (impl RecordBatchReader + Send, Vec<QueryWarning>) {
-        let warnings = self.warnings;
-        let reader = RecordBatchIterator::new(self.batches.into_iter().map(Ok), self.schema);
-        (reader, warnings)
     }
 }
 
@@ -114,7 +97,8 @@ impl Connection {
                     .map_err(|source| Error::SchemaRecovery {
                         query_id: execution.query_id.clone(),
                         source: Box::new(source),
-                    })?,
+                    })?
+                    .1,
             )
         } else {
             None
@@ -170,22 +154,35 @@ impl Connection {
                 ResultError::InvalidSchema("result has no Parquet schema"),
             )
         })?;
-        let mut warnings = Vec::new();
-        if let crate::SessionStatus::Expiring { remaining, .. } =
-            self.session_status().map_err(|_| {
-                result_error(
-                    &execution.query_id,
-                    ResultError::Interrupted(QueryInterruption::SessionExpired),
-                )
-            })?
-        {
-            warnings.push(QueryWarning::SessionExpiring { remaining });
-        }
         Ok(QueryResult {
             query_id: execution.query_id,
             schema,
             batches,
-            warnings,
+        })
+    }
+
+    /// Obtain a typed empty result without executing the data-producing query.
+    /// Used for zero-length DBI parameter sets. This uses the same Parquet
+    /// schema recovery as fileless query results, with the supplied parameters.
+    pub async fn query_empty(
+        &self,
+        sql: &str,
+        options: &QueryOptions,
+        cancellation: &QueryCancellation,
+    ) -> Result<QueryResult, Error> {
+        options.validate()?;
+        let guard = RequestGuard {
+            connection: self,
+            cancellation,
+            deadline: Instant::now() + options.timeout,
+        };
+        let (query_id, schema) = self
+            .recover_empty_schema(crate::query::query_text(sql)?, options, &guard)
+            .await?;
+        Ok(QueryResult {
+            query_id,
+            schema,
+            batches: Vec::new(),
         })
     }
 
@@ -194,7 +191,7 @@ impl Connection {
         sql: &str,
         options: &QueryOptions,
         guard: &RequestGuard<'_>,
-    ) -> Result<SchemaRef, Error> {
+    ) -> Result<(String, SchemaRef), Error> {
         // LIMIT belongs outside the complete original query. The singleton
         // join supplies typed NULLs even when Athena otherwise writes no files.
         // Only this Parquet schema is used; no recovery rows are decoded.
@@ -239,12 +236,14 @@ impl Connection {
                 schema = Some(recovered);
             }
         }
-        schema.ok_or_else(|| {
-            result_error(
-                &execution.query_id,
-                ResultError::InvalidSchema("empty-result recovery produced no Parquet schema"),
-            )
-        })
+        schema
+            .map(|schema| (execution.query_id.clone(), schema))
+            .ok_or_else(|| {
+                result_error(
+                    &execution.query_id,
+                    ResultError::InvalidSchema("empty-result recovery produced no Parquet schema"),
+                )
+            })
     }
 }
 

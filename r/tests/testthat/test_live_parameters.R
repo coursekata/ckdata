@@ -1,0 +1,137 @@
+test_that("Athena time predicates retain difftime units and factor warnings", {
+  context <- local_live_context()
+  con <- context$con
+  clocks <- c(secs = "00:00:01", mins = "00:01:00", hours = "01:00:00")
+  for (units in names(clocks)) {
+    value <- as.difftime(c(1, NA), units = units)
+    sql <- paste0("SELECT 1 AS matched WHERE ? = TIME '", clocks[[units]], "'")
+    testthat::expect_identical(
+      DBI::dbGetQuery(con, sql, params = list(value))$matched,
+      1L
+    )
+  }
+  testthat::expect_identical(
+    DBI::dbGetQuery(
+      con,
+      "SELECT 1 AS matched WHERE ? = TIME '00:00:01.123456'",
+      params = list(as.difftime(1.123456, units = "secs"))
+    )$matched,
+    1L
+  )
+  testthat::expect_identical(
+    DBI::dbGetQuery(
+      con,
+      "SELECT 1 AS matched WHERE ? IS NULL",
+      params = list(as.difftime(NA_real_, units = "hours"))
+    )$matched,
+    1L
+  )
+  testthat::expect_warning(
+    result <- DBI::dbGetQuery(
+      con,
+      "SELECT ? AS value",
+      params = list(factor("invented"))
+    ),
+    "factor"
+  )
+  testthat::expect_identical(result$value, "invented")
+})
+
+test_that("Athena native binding supports rebinding, vectors, nulls and empty vectors", {
+  context <- local_live_context()
+  con <- context$con
+  sql <- "SELECT ? AS text_value, ? AS empty_value, ? AS flag, ? AS integer_value, ? AS number, ? AS big, ? AS day, ? AS stamp, ? AS bytes"
+  values <- list(
+    "O'Brien ? --",
+    "",
+    TRUE,
+    42L,
+    1.25,
+    bit64::as.integer64("9007199254740993"),
+    as.Date("1960-01-02"),
+    as.POSIXct("2026-11-03 12:34:56.123", tz = "UTC"),
+    list(as.raw(c(0, 255)))
+  )
+  result <- DBI::dbSendQuery(con, sql)
+  withr::defer(if (DBI::dbIsValid(result)) DBI::dbClearResult(result))
+  testthat::expect_true(DBI::dbIsValid(result))
+  testthat::expect_false(DBI::dbHasCompleted(result))
+  testthat::expect_equal(DBI::dbGetRowCount(result), 0, tolerance = 0)
+  DBI::dbBind(result, values)
+  first <- DBI::dbFetch(result)
+  testthat::expect_identical(first$text_value, values[[1]])
+  testthat::expect_identical(first$empty_value, "")
+  testthat::expect_identical(first$flag, TRUE)
+  testthat::expect_identical(first$integer_value, 42L)
+  testthat::expect_identical(first$number, 1.25)
+  testthat::expect_identical(as.character(first$big), "9007199254740993")
+  testthat::expect_identical(first$day, values[[7]])
+  expect_timestamp_equal(first$stamp, values[[8]])
+  testthat::expect_identical(first$bytes[[1]], values[[9]][[1]])
+  nulls <- purrr::map(values, function(x) x[NA_integer_])
+  DBI::dbBind(result, nulls)
+  missing <- DBI::dbFetch(result)
+  testthat::expect_identical(nrow(missing), 1L)
+  purrr::walk(missing[1:8], function(column) {
+    testthat::expect_true(all(is.na(column)))
+  })
+  testthat::expect_null(missing$bytes[[1]])
+  DBI::dbBind(result, purrr::map(values, function(x) x[0]))
+  empty <- DBI::dbFetch(result)
+  testthat::expect_identical(nrow(empty), 0L)
+  testthat::expect_equal(empty, first[0, ], ignore_attr = "tzone")
+  DBI::dbClearResult(result)
+  result <- DBI::dbSendQuery(
+    con,
+    "SELECT id, big, arr FROM types WHERE id = ? /* ? */ -- ?\n"
+  )
+  DBI::dbBind(result, list(c(2L, 1L)))
+  testthat::expect_identical(DBI::dbFetch(result, 1)$id, 2L)
+  testthat::expect_false(DBI::dbHasCompleted(result))
+  testthat::expect_identical(DBI::dbFetch(result)$id, 1L)
+  testthat::expect_equal(DBI::dbGetRowCount(result), 2, tolerance = 0)
+  DBI::dbBind(result, list(999L))
+  empty <- DBI::dbFetch(result)
+  testthat::expect_identical(nrow(empty), 0L)
+  testthat::expect_s3_class(empty$big, "integer64")
+  testthat::expect_type(empty$arr, "list")
+  DBI::dbBind(result, list(1L))
+  testthat::expect_identical(DBI::dbFetch(result)$id, 1L)
+  DBI::dbClearResult(result)
+  sql <- "SELECT ? AS big, ? AS number"
+  full <- arrow::as_arrow_table(DBI::dbGetQueryArrow(
+    con,
+    sql,
+    params = list(bit64::as.integer64(1), 1)
+  ))
+  empty <- arrow::as_arrow_table(DBI::dbGetQueryArrow(
+    con,
+    sql,
+    params = list(bit64::integer64(), numeric())
+  ))
+  testthat::expect_true(full$schema$Equals(empty$schema))
+  testthat::expect_identical(full$big$type$ToString(), "int64")
+  testthat::expect_identical(full$number$type$ToString(), "double")
+  specials <- DBI::dbGetQuery(
+    con,
+    "SELECT ? AS positive, ? AS negative, ? AS nan_value",
+    params = list(Inf, -Inf, NaN)
+  )
+  testthat::expect_identical(specials$positive, Inf)
+  testthat::expect_identical(specials$negative, -Inf)
+  testthat::expect_true(is.nan(specials$nan_value))
+  result <- DBI::dbSendQuery(
+    con,
+    "SELECT CAST(? AS INTEGER) AS value",
+    params = list("3")
+  )
+  testthat::expect_error(
+    DBI::dbBind(result, list(c("1", "invented-invalid-integer"))),
+    "INVALID_CAST_ARGUMENT",
+    class = "ckdata_native_error"
+  )
+  testthat::expect_identical(DBI::dbFetch(result)$value, 3L)
+  DBI::dbBind(result, list("4"))
+  testthat::expect_identical(DBI::dbFetch(result)$value, 4L)
+  DBI::dbClearResult(result)
+})

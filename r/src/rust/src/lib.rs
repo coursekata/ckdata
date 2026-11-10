@@ -2,6 +2,8 @@ use arrow_array::ffi_stream::FFI_ArrowArrayStream;
 use extendr_api::prelude::*;
 use extendr_ffi::{R_ClearExternalPtr, R_ExternalPtrAddr, R_MakeExternalPtr, SEXP};
 
+mod bridge;
+
 /// The core version, then the Athena and S3 SDK versions.
 /// @noRd
 #[extendr]
@@ -22,12 +24,10 @@ extern "C" fn finalize_stream(value: SEXP) {
     }
 }
 
-/// Create an owned nanoarrow stream containing the core's literal probe.
-/// @noRd
-#[extendr]
-fn arrow_probe_stream() -> extendr_api::Result<Robj> {
-    let reader = ckdata::arrow_probe().map_err(|e| Error::Other(e.to_string()))?;
-    let stream = Box::new(FFI_ArrowArrayStream::new(reader));
+fn owned_stream(
+    reader: impl arrow_array::RecordBatchReader + Send + 'static,
+) -> extendr_api::Result<Robj> {
+    let stream = Box::new(FFI_ArrowArrayStream::new(Box::new(reader)));
     // SAFETY: Rust supplies the allocation; no caller-provided address is accepted.
     // The external pointer owns the Box, and nanoarrow consumes the standard Arrow C
     // stream. Its tag and protected object are NULL as required by nanoarrow/r.h.
@@ -47,5 +47,5 @@ fn arrow_probe_stream() -> extendr_api::Result<Robj> {
 extendr_module! {
     mod ckdata;
     fn core_versions;
-    fn arrow_probe_stream;
+    use bridge;
 }

@@ -5,3 +5,7 @@ __pycache__/
 .venv/
 
 .pytest_cache/
+.local/
+node_modules/
+.ruff_cache/
+lefthook-local.yml

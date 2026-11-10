@@ -18,8 +18,8 @@ copyright/license preambles are also preserved. Identical texts share a SHA-256
 reference. Upstream snapshots supply files omitted from published crate archives.
 Refresh or verify with: python3 scripts/check_licenses.py [--write]
 
-Cargo.lock SHA-256: 6ee6e3ad36ebf04a03bf3d98730aa7a41f11631f34156fd1170fdc9f362604ff
-Registry packages: 283
+Cargo.lock SHA-256: 19e0f62b57d8c4a245a3114329605604a1a510a1608d85d51997b010f5660c99
+Registry packages: 284
 
 Inventory
 =========
@@ -104,7 +104,7 @@ Selected license obligations: MIT
   LICENSE-MIT
     Text SHA-256: ff3f1cd12af8866d9bde961d6cc40df774cd131d484de31d3170c4b02b21a7b5
 
-arrow-array 59.3.2
+arrow-array 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0 AND MIT
@@ -124,6 +124,8 @@ Selected license obligations: Apache-2.0 AND MIT
   benches/null_dict.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/occupancy.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/primitive_array.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/record_batch.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -167,6 +169,8 @@ Selected license obligations: Apache-2.0 AND MIT
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/array/union_array.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/array_reader.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/builder/boolean_builder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/builder/buffer_builder.rs (source preamble)
@@ -200,6 +204,8 @@ Selected license obligations: Apache-2.0 AND MIT
   src/builder/primitive_dictionary_builder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/builder/primitive_run_builder.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/builder/struct_array_assembler.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/builder/struct_builder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -236,7 +242,7 @@ Selected license obligations: Apache-2.0 AND MIT
   src/types.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
 
-arrow-buffer 59.3.2
+arrow-buffer 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0
@@ -248,6 +254,8 @@ Selected license obligations: Apache-2.0
   benches/bit_mask.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/i256.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/mutable_buffer_extend.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/mutable_buffer_repeat_slice.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -291,6 +299,8 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/bytes.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/error.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/interval.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/lib.rs (source preamble)
@@ -310,7 +320,21 @@ Selected license obligations: Apache-2.0
   src/util/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
 
-arrow-data 59.3.2
+arrow-cmp 60.1.0
+Source: registry+https://github.com/rust-lang/crates.io-index
+Repository: https://github.com/apache/arrow-rs
+Declared license: Apache-2.0
+Selected license obligations: Apache-2.0
+  LICENSE.txt
+    Text SHA-256: 03548525ec3706de58e48ef6e3c455582557a0ad3b54a2da9a3819add35dfb72
+  NOTICE.txt
+    Text SHA-256: e5b198d7f809311723889814d99a92f808c69e89a847efa7a7b65270f5fdeae6
+  benches/dict_cmp.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/lib.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+
+arrow-data 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0
@@ -386,7 +410,7 @@ Selected license obligations: Apache-2.0
   src/transform/variable_size.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
 
-arrow-ipc 59.3.2
+arrow-ipc 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0
@@ -428,7 +452,7 @@ Selected license obligations: Apache-2.0
   src/writer.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
 
-arrow-schema 59.3.2
+arrow-schema 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0
@@ -473,10 +497,12 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/lib.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/metadata.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/schema.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
 
-arrow-select 59.3.2
+arrow-select 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0
@@ -485,9 +511,13 @@ Selected license obligations: Apache-2.0
     Text SHA-256: 03548525ec3706de58e48ef6e3c455582557a0ad3b54a2da9a3819add35dfb72
   NOTICE.txt
     Text SHA-256: e5b198d7f809311723889814d99a92f808c69e89a847efa7a7b65270f5fdeae6
+  benches/filter_bits.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/coalesce.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/coalesce/byte_view.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/coalesce/fixed_size_binary.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/coalesce/generic.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7184,7 +7214,7 @@ Selected license obligations: MIT
   LICENSE
     Text SHA-256: a00511478c83ebb464ef19d840f061c7444adc4636bb561900e75c5808cfc6cc
 
-parquet 59.3.2
+parquet 60.1.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 Repository: https://github.com/apache/arrow-rs
 Declared license: Apache-2.0
@@ -7193,23 +7223,35 @@ Selected license obligations: Apache-2.0
     Text SHA-256: 03548525ec3706de58e48ef6e3c455582557a0ad3b54a2da9a3819add35dfb72
   NOTICE.txt
     Text SHA-256: e5b198d7f809311723889814d99a92f808c69e89a847efa7a7b65270f5fdeae6
+  benches/alp.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_reader.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_reader_clickbench.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_reader_peak_memory.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/arrow_reader_predicate_fusion.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_reader_row_filter.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_reader_row_selection_policy.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/arrow_reader_string_encoding.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_statistics.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/arrow_writer.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/arrow_writer_peak_memory.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/bit_packing.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/bloom_filter.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/compression.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/dictionary_skip.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/encoding.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7220,6 +7262,8 @@ Selected license obligations: Apache-2.0
   benches/push_decoder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/row_group_index_reader.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/row_selection_algebra.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/row_selection_cursor.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7245,9 +7289,15 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   benches/writer_overhead.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  benches/writer_page_windows.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  examples/custom_page_index.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   examples/external_metadata.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   examples/object_store.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  examples/opendal.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   examples/read_parquet.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7315,6 +7365,18 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/arrow/arrow_reader/statistics.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/arrow_reader/tests/column_reader.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/arrow_reader/tests/mod.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/arrow_reader/tests/options.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/arrow_reader/tests/row_selection.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/arrow_reader/tests/schema.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/arrow_reader/tests/virtual_columns.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/arrow/arrow_writer/byte_array.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/arrow/arrow_writer/levels.rs (source preamble)
@@ -7361,7 +7423,17 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/arrow/push_decoder/reader_builder/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/push_decoder/reader_builder/stages.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/arrow/push_decoder/remaining.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/push_decoder/scan_plan/budget.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/push_decoder/scan_plan/frontier.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/push_decoder/scan_plan/mod.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/arrow/push_decoder/scan_plan/tests.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/arrow/record_reader/buffer.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7416,16 +7488,20 @@ Selected license obligations: Apache-2.0
   src/column/page_encryption.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/column/page_encryption_disabled.rs (source preamble)
-    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+    Text SHA-256: 28b185da3b4eef7760a14957e5a457f6e02e97b679cd7024b8800664b825c341
   src/column/page_store.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/column/reader.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/column/reader/decoder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/column/reader/legacy_fixed_len_byte_array.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/column/writer/byte_budget_chunker.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/column/writer/encoder.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/column/writer/min_max.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/column/writer/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7433,9 +7509,15 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/data_type.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/encodings/alp.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/encodings/decoding.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/encodings/decoding/alp_decoder.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/encodings/decoding/byte_stream_split_decoder.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/encodings/encoding/alp_encoder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/encodings/encoding/byte_stream_split_encoder.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7463,6 +7545,8 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/file/column_crypto_metadata.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/file/metadata/dictionary.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/file/metadata/footer_tail.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/file/metadata/memory.rs (source preamble)
@@ -7470,6 +7554,8 @@ Selected license obligations: Apache-2.0
   src/file/metadata/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/file/metadata/options.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/file/metadata/page_index.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/file/metadata/parser.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7547,6 +7633,8 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/util/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  src/util/prefix.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/util/push_buffers.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/util/test_common/file_util.rs (source preamble)
@@ -7561,6 +7649,8 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   src/variant.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/async_reader.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/bad_data.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/bloom_filter/async.rs (source preamble)
@@ -7570,6 +7660,8 @@ Selected license obligations: Apache-2.0
   tests/arrow_reader/bloom_filter/sync.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/checksum.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/custom_page_index_provider.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/int96_stats_roundtrip.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7583,9 +7675,19 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/large_string_overflow.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/legacy_fixed_len_byte_array.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/page_index.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/parquet_testing.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/partial_offset_index.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/predicate_cache.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_reader/push_decoder_equivalence.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/row_filter/async.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7595,9 +7697,13 @@ Selected license obligations: Apache-2.0
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/arrow_reader/statistics.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  tests/arrow_writer.rs (source preamble)
+  tests/arrow_writer/layout.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
-  tests/arrow_writer_layout.rs (source preamble)
+  tests/arrow_writer/mod.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_writer/roundtrip.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/arrow_writer/roundtrip_helpers.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/encryption/encryption.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -7612,6 +7718,8 @@ Selected license obligations: Apache-2.0
   tests/encryption/mod.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/geospatial.rs (source preamble)
+    Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
+  tests/ieee754_nan_interop.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
   tests/variant_integration.rs (source preamble)
     Text SHA-256: ebf31b3d15a1750ee6e7b880a14de13bcb6736b19d61c4fcef0ac3c816c34729
@@ -16270,6 +16378,28 @@ DEALINGS IN THE SOFTWARE.
 // SPDX-License-Identifier: ISC
 // Modifications copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR ISC
+
+
+--- Text SHA-256: 28b185da3b4eef7760a14957e5a457f6e02e97b679cd7024b8800664b825c341 ---
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+// The methods below mirror the signatures of the real `PageEncryptor`, so that the
+// callers do not need a `cfg` of their own.
 
 
 --- Text SHA-256: 28c2219e2d32770920a5b3392307d1098c6ec46962760bd1501cd29fb11ab960 ---
