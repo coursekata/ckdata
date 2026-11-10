@@ -12,8 +12,19 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts/repo-files.py"
 
 
 @pytest.fixture
-def repository(tmp_path):
+def repository(tmp_path, monkeypatch):
+    # Hooks inherit the caller's repository locators. Clear Git's own list so
+    # fixture commands cannot add files to the caller's real index.
+    variables = subprocess.check_output(
+        ["git", "rev-parse", "--local-env-vars"], text=True
+    ).splitlines()
+    for variable in variables:
+        monkeypatch.delenv(variable, raising=False)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    git_dir = subprocess.check_output(
+        ["git", "rev-parse", "--absolute-git-dir"], cwd=tmp_path, text=True
+    )
+    assert Path(git_dir.strip()).resolve() == (tmp_path / ".git").resolve()
     return tmp_path
 
 
