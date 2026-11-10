@@ -50,9 +50,9 @@ test_that("an interactive native failure reaches a wrapped console callback once
       {
         stopifnot(length(errors) == 1L)
         stopifnot(inherits(errors[[1]], "ckdata_native_error"))
-        cat("CANCEL_ERROR_HANDLED\n")
+        q("no", status = 0L)
       }
-      q("no")
+      q("no", status = 1L)
     )"
     ),
     script
@@ -75,7 +75,6 @@ test_that("an interactive native failure reaches a wrapped console callback once
     output[startsWith(output, "! ")],
     "! synthetic query cancelled"
   )
-  expect_true("CANCEL_ERROR_HANDLED" %in% output)
 })
 
 test_that("forked sessions reject inherited native runtimes promptly", {
