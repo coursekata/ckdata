@@ -4,11 +4,6 @@ Complete [installation and configuration](installation.md) first. That guide
 also records which parts of the target R and Python interface are available
 in the current build.
 
-CourseKata's internal documentation covers researcher installation and access.
-The [internal researcher runbook](researcher-walkthrough.md) and
-[QA acceptance runbook](qa-walkthrough.md) are separate local review workflows
-using invented data, rather than package onboarding instructions.
-
 ## Queries in R
 
 `lake_tbl()` creates a lazy dbplyr table. Compose dplyr operations on it, then
