@@ -73,9 +73,9 @@ native_probe_workgroup <- function() .Call(wrap__native_probe_workgroup)
 #' @noRd
 native_probe_metadata <- function() .Call(wrap__native_probe_metadata)
 
-#' Offline asynchronous fixture for interrupt and task-lifetime tests.
+#' Offline asynchronous fixture. Pending jobs complete only on cancellation.
 #' @noRd
-native_probe_job <- function(milliseconds) .Call(wrap__native_probe_job, milliseconds)
+native_probe_job <- function(pending) .Call(wrap__native_probe_job, pending)
 
 #' Offline sign-in metadata through the same conversion as pending jobs and errors.
 #' @noRd

@@ -84,23 +84,20 @@ fn native_probe_metadata() -> List {
     })
 }
 
-/// Offline asynchronous fixture for interrupt and task-lifetime tests.
+/// Offline asynchronous fixture. Pending jobs complete only on cancellation.
 /// @noRd
 #[extendr]
-fn native_probe_job(milliseconds: f64) -> Result<Robj> {
-    if !milliseconds.is_finite() || !(0.0..=60000.0).contains(&milliseconds) {
-        return Err(failure("invalid fixture delay"));
-    }
+fn native_probe_job(pending: bool) -> Result<Robj> {
     let cancellation = QueryCancellation::new();
     let cancel = cancellation.clone();
     spawn(cancellation, false, async move {
-        tokio::select! {
-            _ = cancel.cancelled() => Err(NativeFailure::message("synthetic query cancelled")),
-            _ = tokio::time::sleep(Duration::from_secs_f64(milliseconds / 1000.0)) => {
-                NativeResult::from_reader(fixture_reader().map_err(NativeFailure::message)?)
-                    .map(Completion::Probe).map_err(NativeFailure::message)
-            }
+        if pending {
+            cancel.cancelled().await;
+            return Err(NativeFailure::message("synthetic query cancelled"));
         }
+        NativeResult::from_reader(fixture_reader().map_err(NativeFailure::message)?)
+            .map(Completion::Probe)
+            .map_err(NativeFailure::message)
     })
 }
 

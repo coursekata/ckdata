@@ -44,7 +44,7 @@ local_native_connection <- function(env = rlang::caller_env()) {
           class = "metadata_fixture"
         )
       } else {
-        native_probe_job(0)
+        native_probe_job(pending = FALSE)
       }
     },
     native_disconnect = function(object) invisible(NULL),

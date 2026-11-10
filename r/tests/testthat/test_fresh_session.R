@@ -44,7 +44,7 @@ test_that("an interactive native failure reaches a wrapped console callback once
         errors[[length(errors) + 1L]] <<- rlang::last_error()
         if (!is.null(previous_error)) eval(previous_error)
       })
-      job <- ckdata:::native_probe_job(60000)
+      job <- ckdata:::native_probe_job(pending = TRUE)
       ckdata:::native_cancel(job)
       ckdata:::native_wait(job)
       {
@@ -96,7 +96,7 @@ test_that("forked sessions reject inherited native runtimes promptly", {
       shutdown <- rlang::env_get(ns, "native_shutdown")
 
       check_job <- function() {
-        value <- wait(probe(0))
+        value <- wait(probe(pending = FALSE))
         stopifnot(info(value$handle)$rows == 2)
         clear(value$handle)
         TRUE
@@ -135,9 +135,9 @@ test_that("forked sessions reject inherited native runtimes promptly", {
 
       check_job()
       # Keep a synthetic task pending so an unguarded child shutdown would hang.
-      pending <- probe(60000)
+      pending <- probe(pending = TRUE)
       collect_child(parallel::mcparallel({
-        message <- tryCatch(probe(0), error = conditionMessage)
+        message <- tryCatch(probe(pending = FALSE), error = conditionMessage)
         stopifnot(is.character(message), length(message) == 1L)
         stopifnot(grepl("forked process", message, fixed = TRUE))
         stopifnot(grepl("fresh R session or PSOCK", message, fixed = TRUE))

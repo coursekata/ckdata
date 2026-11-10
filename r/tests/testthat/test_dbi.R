@@ -220,7 +220,7 @@ test_that("foreign or serialized external pointers are rejected before dereferen
 })
 
 test_that("an R interrupt cancels and drains a real native asynchronous job", {
-  job <- native_probe_job(10000)
+  job <- native_probe_job(pending = TRUE)
   cleanup <- local_native_cancellation()
   ready <- native_ready
   calls <- 0L
@@ -248,11 +248,11 @@ test_that("an R interrupt cancels and drains a real native asynchronous job", {
 })
 
 test_that("runtime shutdown drains cancellation and allows a fresh runtime", {
-  job <- native_probe_job(10000)
+  job <- native_probe_job(pending = TRUE)
   native_shutdown()
   expect_true(native_ready(job))
   expect_error(native_value(job), "cancelled")
-  value <- native_wait(native_probe_job(0))
+  value <- native_wait(native_probe_job(pending = FALSE))
   expect_equal(native_result_info(value$handle)$rows, 2)
   native_result_clear(value$handle)
 })
@@ -434,7 +434,7 @@ test_that("Arrow chunks use the native cursor and expose standard result info", 
 })
 
 test_that("elapsed time-limit errors cancel and drain native work", {
-  job <- native_probe_job(1000)
+  job <- native_probe_job(pending = TRUE)
   cleanup <- local_native_cancellation()
   withr::defer({
     setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
