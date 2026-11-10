@@ -52,11 +52,7 @@ across Athena's output files; sort after retrieval when local order matters.
 
 - [Installation and configuration](docs/installation.md)
 - [Usage, saved results and query behavior](docs/usage.md)
-- [Internal researcher runbook](docs/researcher-walkthrough.md)
-- [QA walkthrough with synthetic data](docs/qa-walkthrough.md)
-- [Development and repository structure](docs/development.md)
-- [Testing](tests/README.md)
-- [Releasing](docs/releasing.md)
+- [Development, testing and releases](docs/development.md)
 
 R function reference is available through `help(package = "ckdata")`.
 ckdata is licensed under the [MIT license](LICENSE).

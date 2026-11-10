@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "ckdata"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "ckdata-r"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",

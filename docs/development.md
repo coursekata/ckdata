@@ -1,7 +1,8 @@
 # Development
 
-Run commands from the repository root unless stated otherwise. User installation
-and AWS setup are in the [installation guide](installation.md).
+Run commands from the repository root. Package installation and AWS
+configuration are in the [installation guide](installation.md); researcher
+access is documented internally by CourseKata.
 
 ## Repository structure
 
@@ -10,220 +11,204 @@ and AWS setup are in the [installation guide](installation.md).
 | `core/` | Shared Rust Athena client, Parquet reader and Arrow results; crate `ckdata` |
 | `r/` | R DBI/dbplyr package and extendr adapter; crate `ckdata-r` |
 | `python/` | Python package and PyO3 adapter, built with maturin; crate `ckdata-py`, import `ckdata` |
-| `tests/` | Tests of repository-owned tooling and instructions for package checks |
+| `tests/` | Tests of repository maintenance tooling |
 | `scripts/` | Repository maintenance tooling |
 
-Language adapters handle their host interfaces and conversions; the core owns
-the AWS query and result path. The R crate has its own workspace so its source
-package builds independently. Its `r/src/rust/core` symlink reaches the shared
-core; `R CMD build` copies that source into the package tarball.
+Language adapters own host interfaces and conversions. The core owns AWS
+queries and result retrieval. The R crate has an independent workspace;
+`r/src/rust/core` links to the shared core, which `R CMD build` copies into the
+source tarball.
 
-## Tools and hooks
+## Setup and commands
 
-Install [Just](https://just.systems/man/en/),
-[Rust through rustup](https://rustup.rs), R 4.2 or later,
+Install [Just](https://just.systems/man/en/) 1.46 or later,
+[Rust through rustup](https://rustup.rs) 1.94.1 or later, R 4.2 or later,
 [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js/npm,
 [Actionlint](https://github.com/rhysd/actionlint#installation),
-[Gitleaks](https://github.com/gitleaks/gitleaks#installing) and jq. Just 1.46 or later
-is required for recipe flags; native builds require Rust 1.94.1 or later and
-the platform prerequisites in the installation guide. These executables must
-be on PATH. Just itself can be installed with `uv tool install rust-just`.
-The release-guard tests use jq to execute the workflow's actual result selector.
+[Gitleaks](https://github.com/gitleaks/gitleaks#installing) and jq. Native builds
+also need the platform prerequisites in the installation guide. Put these
+executables on PATH; Just can be installed with `uv tool install rust-just`.
 
 ```sh
 just setup
 just
 ```
 
-`just setup` installs rustfmt and Clippy, fetches locked Cargo dependencies,
-prepares the Python workspace, installs the R package and development
-dependencies with pak, and installs Lefthook's Git hooks. It is safe to rerun;
-it does not authenticate to AWS or provision resources. The default R user
-library is used; standard `R_LIBS_USER`/`R_LIBS` settings still apply.
+Setup installs rustfmt and Clippy, fetches locked Cargo dependencies, prepares
+the uv environment, installs the R package and development dependencies with
+pak, and installs Lefthook's Git hooks. It uses the normal R library settings
+and can be rerun. It does not authenticate to AWS or provision resources.
 
-Cargo outputs default to the shared root `target/`, outside the R source
-package. Setup clears a legacy `r/src/rust/target/` cache if present. R copies
-source directories before applying `.Rbuildignore`, so retaining that old cache
-can exhaust temporary disk space during a source build. `build` fails early
-with setup guidance if the legacy directory reappears. An explicit
-`CARGO_TARGET_DIR` must also stay outside `r/`.
-
-The uv development group pins Just, Lefthook, Ruff, Air and the standard file
-checkers. `.github/package.json` and its npm lock own the existing Renovate
-validator and its supported Node 24 runtime. Setup installs that runtime
-locally and builds the validator's regex dependency with it. No global Node
-switch or custom tool downloader is required.
-
-| Command | Responsibility |
+| Command | Purpose |
 |---|---|
-| `just fmt` | Apply rustfmt, Ruff and Air formatting, plus standard whitespace/end-of-file fixes |
-| `just fmt --check` | Check formatting without modifying maintained source files |
-| `just lint` | Run static analysis and repository checks without source changes |
-| `just lint --fix` | Apply upstream automatic lint fixes and report remaining findings |
+| `just fmt` | Apply rustfmt, Ruff and Air, plus whitespace and end-of-file fixes |
+| `just fmt --check` | Check formatting |
+| `just lint` | Run static analysis and repository checks |
+| `just lint --fix` | Apply supported automatic fixes and report remaining findings |
 | `just test` | Run offline Rust, R, Python and repository-tooling tests |
-| `just check` | Aggregate `fmt --check`, `lint` and `test` |
+| `just check` | Run `fmt --check`, `lint` and `test` |
 | `just build` | Build an R source archive and Python source/wheel distributions in `dist/` |
-| `just build --check` | Build distributions, run `R CMD check` and test the installed Python wheel in a fresh environment |
-| `just docs` | Regenerate the native R wrappers and R documentation |
-| `just test-acceptance` | Run the explicitly configured synthetic AWS suite, with automatic login disabled |
+| `just build --check` | Build distributions, run `R CMD check` and test the installed wheel |
+| `just docs` | Regenerate native R wrappers and R documentation |
+| `just test-acceptance` | Run the configured synthetic AWS suite with automatic login disabled |
 
-`lint --target` accepts `rust`, `r`, `python` or `repo`; `test --target`
-accepts `rust`, `r`, `python` or `tooling`. Both default to `all`.
-Clippy's automatic fixes operate on the working tree, including files with
-uncommitted changes; they do not stage changes. R lint findings require manual
-changes. Generated bindings, upstream legal text and build outputs have the
-appropriate formatting exclusions.
+`lint --target` accepts `rust`, `r`, `python` or `repo`; `test --target` accepts
+`rust`, `r`, `python` or `tooling`. Both default to `all`. Clippy's automatic
+fixes include uncommitted files; they do not stage changes. R lint findings
+require manual changes.
 
-The justfile owns commands and their prerequisites. Lefthook owns Git events:
-commits check formatting and scan staged file contents for secrets; pushes run
-`just check`. All hooks use check mode. Existing prek-generated hooks are
-uninstalled during setup; unrelated hooks are left to Lefthook's normal backup
-handling. CI calls the same recipes where applicable and retains its platform
-matrix, package archive checks and security inventories.
+Just owns commands and prerequisites. Lefthook owns Git events: commits check
+formatting and scan staged contents for secrets; pushes run `just check`.
+Hooks use check mode. Setup removes old prek-generated hooks; Lefthook handles
+backups of unrelated hooks. Editors can invoke the native formatters on save;
+the repository has no editor-specific configuration.
 
-The repository is IDE agnostic. Editors may invoke the configured native
-formatters on save; no editor settings or extension installation are provided.
+The uv development group pins Just, Lefthook, Ruff, Air and file checkers.
+`.github/package.json` and its lockfile own the Renovate validator and Node 24
+runtime. Setup installs that runtime locally and builds its regex dependency.
 [Dependency maintenance](../.github/dependency_policy.md) records update
 ownership, scanners and upstream constraints.
 
-## R
+### Native build caches
 
-`just setup` installs the local package, its test dependencies and the tools
-declared in `Config/Needs/development`. Regenerate native wrappers and R
-documentation with:
+Cargo outputs default to the root `target/`, outside the R source package.
+Setup clears the legacy `r/src/rust/target/` cache if present. R copies source
+before applying `.Rbuildignore`, so a cache inside `r/` can exhaust temporary
+disk space. `build` fails early if it reappears. Keep any explicit
+`CARGO_TARGET_DIR` outside `r/` too.
 
-```sh
-just docs
-```
+### R and Python adapters
 
-This runs the extendr generator from `r/src`, then roxygen2 through devtools.
-Run it after changing an extendr export or R function documentation.
+Run `just docs` after changing an extendr export or R function documentation.
+It runs the extendr generator from `r/src`, then roxygen2 through devtools.
+`r/tools/config.R` configures platform flags and native build caches; Cargo
+enforces the minimum Rust version.
 
-`r/tools/config.R` configures the native build, including platform flags and
-build-cache handling. Cargo enforces the manifests' minimum Rust version.
+Python requires 3.11 or later. The root `pyproject.toml` and `uv.lock` define
+one development environment. The `bindings` group supplies maturin, PyArrow,
+dataframe libraries and pytest. Setup and Python tests install locked build
+tools through uv before compiling the binding. Distribution builds use the
+backend's isolated build path.
 
-The two local review runbooks separate the
-[internal researcher workflow](researcher-walkthrough.md) from
-[QA acceptance](qa-walkthrough.md). Researcher installation and access setup
-belong in CourseKata's internal documentation. The package provides function and
-configuration references without provisioning a demo environment.
+### Windows
 
-### Local UAT environment
-
-The test operator prepares the local rehearsal before handing over the
-researcher runbook. Install the current checkout using `just setup`, which
-uses the normal R user library. The rehearsal must not require a separate
-package library or a change to the researcher's library search path.
-
-For the retained synthetic deployment, the prepared directory is
-`.local/researcher-uat/`. Its ignored `.Renviron` selects the fixture-only AWS
-configuration, source profile, region, restricted reader role, workgroup and
-database. It also holds the synthetic acceptance contract path and the chosen
-freshness schedule. Its `.Rprofile` clears conflicting inherited source settings
-and sets rehearsal options without connecting. The legacy connection variables
-are used here to exercise compatibility. No package-library variables are set.
-Real deployment configuration should also select its database explicitly;
-the package's generic database fallback is `default`.
-
-Verify startup with an ordinary fresh R process whose initial working directory
-is the prepared folder. For example, from the repository root:
-
-```sh
-cd .local/researcher-uat
-R --no-save --no-restore
-```
-
-The same startup applies to a fresh R terminal launched there by an editor;
-an RStudio project is optional. R must read its normal startup files, so do not
-launch with `--vanilla`, `--no-environ` or `--no-init-file`. Changing a running
-process's directory is not a new startup. Do not compensate by adding startup
-loading calls to researcher code.
-
-Before handoff, verify that `library(ckdata)` uses the ordinary user library,
-that the fixture settings were loaded automatically and that no managed
-connection exists yet. Startup and package loading must not authenticate.
-Browser sign-in is exercised by the researcher's first connection. Separate
-offline tests cover the sign-in handoff and failure paths without authenticating
-the tester. The researcher runbook begins with package loading and ordinary
-package calls; identity checks and deliberate failures belong in the QA runbook.
-
-## Configuration boundaries and defaults
-
-The R adapter resolves legacy R-package environment aliases in one mapper in
-`r/R/settings.R`. Canonical `CKDATA_*` names win without rewriting the process's
-`AWS_*` configuration. Both managed helpers and explicit DBI connections use
-the same defaults. The shared Rust core receives explicit connection settings;
-the thin Python adapter does not yet expose query configuration.
-
-Runtime defaults select no CourseKata account, role, region, output bucket or
-production database. A workgroup is required; the generic database fallback is
-`default`. Credentials and region otherwise follow the AWS SDK chain. Result
-locations use workgroup settings unless an allowed client override is supplied.
-No freshness schedule or timezone is assumed. Saved results default to session
-temporary storage; explicit snapshots default to the working directory.
-
-The existing `lake_*` helper names and CourseKata column-migration policies are
-retained for compatibility. Column checks are opt-in through audit/publish mode;
-the default explore mode leaves queries alone. The core currently uses the
-standard `AwsDataCatalog`; selecting other catalogs is an API capability gap,
-not an organization-specific default. Release channels remain CourseKata-owned.
-
-## Python
-
-Python 3.11 or later is required; uv can provide it. The root `pyproject.toml`
-and `uv.lock` define one development environment. Just invokes uv without an
-environment activation step:
-
-```sh
-just setup
-just test --target python
-just test --target tooling
-```
-
-The `bindings` dependency group supplies maturin, PyArrow, dataframe libraries
-and pytest. Setup and Python tests use uv's package-specific build setting to
-install locked build tools before compiling the binding, including in a fresh
-environment.
-Distribution builds use the backend's isolated build path.
-
-## Testing
-
-Follow [Testing](../tests/README.md) for Cargo, R package and Python checks, plus
-the opt-in synthetic AWS suites. Each package uses its normal test runner.
-Live checks use separately provisioned invented fixtures and restricted roles.
-
-## Shared Rust query API
-
-`Connection::query` takes SQL, `QueryOptions` and a `QueryCancellation` token.
-It returns a `QueryResult` with a Parquet-derived schema and owned Arrow batches.
-The core trims whitespace and one trailing semicolon before wrapping the query
-in UNLOAD. Athena validates the SQL. The SDK's paginated manifest API supplies
-file paths, and the upstream Parquet reader decodes the files.
-
-Every successful result includes a schema and reader. Fileless results use one
-schema-only UNLOAD; a zero-row Parquet file needs no recovery. Recovery shares
-the original timeout and cancellation signal. Failures retain the original
-query ID and the recovery error.
-
-Signal cancellation and keep awaiting the query so the client can request a
-remote stop. The core installs no global Ctrl-C handler.
-`into_reader()` transfers the Arrow reader. AWS providers manage credential
-renewal; hosts can service `SsoLogin` requests without restarting the native
-query future. The core does not sort results or promise an out-of-core memory
-bound.
-
-## Windows
-
-Enable Developer Mode and clone with symlinks enabled; otherwise Git checks the
-shared core's symlink out as a text file:
+Enable Developer Mode and clone with symlinks enabled so the shared core's
+link is preserved:
 
 ```sh
 git clone -c core.symlinks=true https://github.com/coursekata/ckdata.git
 ```
 
 Install matching Rtools and Rust's GNU target as described in the installation
-guide.
+guide. Use hosted Windows CI to verify Windows behavior from macOS or Linux;
+Docker Desktop on macOS runs a Linux VM, not Windows.
 
-From macOS or Linux, use the hosted Windows CI job to verify Windows runtime
-behavior. Docker Desktop on macOS runs a Linux VM; a Linux container cannot
-exercise Windows environment variables, paths or R console behavior.
+## Testing
+
+Tests stay with the code they exercise. The shared core uses Cargo, the R
+package uses testthat and the Python binding uses pytest. Root `tests/unit/`
+covers repository release and license tooling. The R crate's native tests run
+separately from the root Cargo workspace.
+
+`just check` runs the offline suite. `just build --check` checks the actual R
+source archive and tests the installed Python wheel in a temporary environment.
+There is no separate R build simulator or tarball checker. CI starts Linux,
+macOS and Windows R checks as soon as the source archive is ready; Rust lint,
+core tests and Python tests run independently. Every job is required. Native
+caches are saved after failures so completed compilation can be reused.
+
+R tests cover read-side DBI behavior, dbplyr translations, parameter binding,
+types, Arrow ownership, saved results, authentication and credential renewal.
+They use invented native fixtures and SQLite tables. Private native fixture
+entrypoints remain in the installed adapter so tests can exercise real cursors,
+streams and asynchronous jobs. The core tests Parquet retrieval with fake AWS
+responses. Writes and transactions are outside the read-only backend's scope.
+
+### Synthetic AWS smoke tests
+
+The opt-in `r/tests/testthat/test_live_*.R` tests exercise the real reader against
+invented data. Provisioning and fixture permission tests belong to ck-datalake's
+independent `environments/ckdata-test` environment. Its deployment contract
+identifies the restricted roles, workgroups and invented `types` table.
+
+With the local package installed, supply the contract and selected seat:
+
+```sh
+CKDATA_TEST_DEPLOYMENT=/absolute/path/to/ckdata-test-deployment.json \
+CKDATA_TEST_SEAT=internal just test-acceptance
+```
+
+Use `research` for the other seat with its appropriate AWS source identity.
+The suite verifies the configured account, role, workgroup, schema and output
+protection before querying. It covers metadata, nested and empty results, exact
+integers, temporal values, DBI paging, binding, joins and saved Parquet results.
+It never reads real research tables or deletes AWS outputs. Missing credentials
+fail immediately; this command never opens sign-in. Ordinary tests skip live
+queries before credential discovery unless `CKDATA_RUN_LIVE_TESTS=true`.
+
+The core's smoke example uses the same deployment contract and fixed queries:
+
+```sh
+cargo run -p ckdata --example query_acceptance -- --help
+cargo run -p ckdata --example query_acceptance -- \
+  --deployment /absolute/path/to/ckdata-test-deployment.json --run-live
+```
+
+It validates the contract before authenticating, checks the restricted reader
+identities and tests the result path without printing rows. There is no arbitrary
+SQL option. Credential renewal uses offline tests with a virtual clock.
+Real-role/enclave checks and elapsed-hour expiry remain final BB-6313 acceptance;
+any real-data query needs Adam's prior approval and must use aggregates without PII.
+
+The remaining manual smoke check is browser launch: from an interactive R session
+with synthetic SSO settings and expired or absent credentials, the first
+connection should open AWS sign-in and resume after it completes. Package loading
+must not authenticate. Browser process handling, cancellation, precedence and
+renewal are covered by unit tests; `login = FALSE` suppresses browser interaction.
+
+## Shared core API and defaults
+
+`Connection::query` takes SQL, `QueryOptions` and a `QueryCancellation` token,
+returning a `QueryResult` with a Parquet schema and owned Arrow batches. The core
+trims whitespace and one trailing semicolon before wrapping SQL in UNLOAD.
+Athena validates the SQL; the paginated manifest API supplies file paths and the
+upstream Parquet reader decodes them. Fileless results use one schema-only
+UNLOAD under the original timeout and cancellation signal. Failures retain the
+original query ID and recovery error.
+
+Signal cancellation and keep awaiting the query so the client can request a
+remote stop. The core installs no global Ctrl-C handler. `into_reader()`
+transfers the Arrow reader. AWS providers renew credentials; hosts service
+`SsoLogin` requests without restarting the native query job. The core does not
+sort results or promise an out-of-core memory bound.
+
+The R adapter maps legacy environment aliases in `r/R/settings.R` without
+rewriting `AWS_*` settings. Managed helpers and DBI use the same defaults;
+Rust receives explicit settings. No CourseKata account, role, region, output
+bucket, freshness schedule or production database is selected automatically.
+A workgroup is required; schema defaults to `default` and the catalog is
+`AwsDataCatalog`. The Python query configuration interface is still pending.
+
+## Releases
+
+R releases use CourseKata's R-universe registry with `subdir: r` and
+`branch: "*release"`. Python wheel publication is pending.
+
+1. Update `core/Cargo.toml`, `python/Cargo.toml`, `r/src/rust/Cargo.toml`,
+   `r/DESCRIPTION` and `r/NEWS.md` together. Refresh the native lockfiles with
+   `cargo update --workspace` in both workspaces.
+2. Run `python3 scripts/check_licenses.py --write` and review the notice changes.
+   Merge the version change and wait for successful CI on that main commit.
+3. Create and push a lightweight `vX.Y.Z` tag pointing to that commit. The release
+   workflow requires `R_RELEASE_READY=true`, matching versions and successful
+   main CI before creating the GitHub release.
+4. R-universe builds the binaries. The workflow waits for them, installs without
+   Rust and runs the installed R tests on current R for Ubuntu 26.04 x86_64,
+   macOS arm64 and Windows x86_64. Linux must match R-universe's distribution.
+
+Never move a release tag; release a new version for a fix. The
+[`verify_release` workflow](../.github/workflows/verify_release.yml) can repeat
+binary verification for an existing version. When changing the release compiler,
+run `python3 scripts/check_licenses.py --runtime-write --write` and review its
+provenance and licenses. `--archive /absolute/path/to/package` checks notices in
+a wheel, source archive or R tarball.
