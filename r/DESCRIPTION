@@ -1,6 +1,6 @@
 Package: ckdata
 Title: Query Amazon Athena
-Version: 0.0.1
+Version: 0.1.0
 Authors@R: c(
     person("Adam", "Blake", email = "adam@ablake.dev", role = c("aut", "cre")),
     person("CourseKata", role = "cph")

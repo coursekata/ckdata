@@ -18,7 +18,7 @@ copyright/license preambles are also preserved. Identical texts share a SHA-256
 reference. Upstream snapshots supply files omitted from published crate archives.
 Refresh or verify with: python3 scripts/check_licenses.py [--write]
 
-Cargo.lock SHA-256: 22e0dc9e2348a7acb00fea68643a775cb37757e9c662e06d526ba1dbf150acbb
+Cargo.lock SHA-256: c364c58b8bae64660fd0ec00afee63c3c536de19c5915edd353c943813aaec7e
 Registry packages: 308
 
 Inventory

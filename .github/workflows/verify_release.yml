@@ -9,13 +9,13 @@ on:
   workflow_call:
     inputs:
       version:
-        description: The release to check, such as v0.0.1 or 0.0.1.
+        description: The release to check, such as v0.1.0 or 0.1.0.
         type: string
         required: true
   workflow_dispatch:
     inputs:
       version:
-        description: The release to check, such as v0.0.1 or 0.0.1.
+        description: The release to check, such as v0.1.0 or 0.1.0.
         required: true
 
 permissions:

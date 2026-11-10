@@ -1,4 +1,4 @@
-# ckdata 0.0.1
+# ckdata 0.1.0
 
 * Adds an Athena DBI backend and dbplyr workflows, including positional query
   parameters and Arrow retrieval.
