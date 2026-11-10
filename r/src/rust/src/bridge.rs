@@ -25,6 +25,16 @@ struct NativeFailure {
     remote_may_be_running: bool,
 }
 
+fn login_target_list(target: ckdata::SsoLoginTarget) -> List {
+    // Absent settings are NULL in the R interface; extendr maps Option<String>
+    // directly to NA, which would be written as a bogus AWS configuration.
+    list!(
+        profile = target.profile,
+        session = target.session.map_or_else(|| ().into_robj(), Robj::from),
+        config = target.config.map_or_else(|| ().into_robj(), Robj::from)
+    )
+}
+
 impl NativeFailure {
     fn message(message: impl ToString) -> Self {
         Self {
@@ -49,14 +59,7 @@ impl NativeFailure {
             login_disabled = self.login_disabled,
             sso_login = self.sso_login.map_or_else(
                 || ().into_robj(),
-                |target| {
-                    list!(
-                        profile = target.profile,
-                        session = target.session,
-                        config = target.config
-                    )
-                    .into_robj()
-                }
+                |target| login_target_list(target).into_robj()
             ),
             cancellation = cancellation.map_or_else(|| ().into_robj(), |value| value.into_robj()),
             remote_may_be_running = self.remote_may_be_running
@@ -321,14 +324,7 @@ fn native_login_target(object: Robj) -> Result<Robj> {
     let target = handle::<NativeJob>(object)?.login.pending();
     Ok(target.map_or_else(
         || ().into_robj(),
-        |target| {
-            list!(
-                profile = target.profile,
-                session = target.session,
-                config = target.config
-            )
-            .into_robj()
-        },
+        |target| login_target_list(target).into_robj(),
     ))
 }
 

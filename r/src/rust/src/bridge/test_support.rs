@@ -104,10 +104,37 @@ fn native_probe_job(milliseconds: f64) -> Result<Robj> {
     })
 }
 
+/// Offline sign-in metadata through the same conversion as pending jobs and errors.
+/// @noRd
+#[extendr]
+fn native_probe_login_targets() -> List {
+    let legacy = ckdata::SsoLoginTarget {
+        profile: "synthetic".into(),
+        session: None,
+        config: None,
+    };
+    let profile = ckdata::SsoLoginTarget {
+        session: Some("synthetic-session".into()),
+        ..legacy.clone()
+    };
+    let direct = ckdata::SsoLoginTarget {
+        config: Some("[profile synthetic]\nsso_session = synthetic-session\n[sso-session synthetic-session]\nsso_region = us-west-1\nsso_start_url = https://synthetic.awsapps.com/start\n".into()),
+        ..profile.clone()
+    };
+    list!(
+        legacy = login_target_list(legacy.clone()),
+        profile = login_target_list(profile),
+        direct = login_target_list(direct),
+        failure =
+            NativeFailure::from(ckdata::Error::SsoLoginRequired { target: legacy }).into_list()
+    )
+}
+
 extendr_module! {
     mod test_support;
     fn native_probe_result;
     fn native_probe_workgroup;
     fn native_probe_metadata;
     fn native_probe_job;
+    fn native_probe_login_targets;
 }

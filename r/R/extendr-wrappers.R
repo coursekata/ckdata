@@ -77,4 +77,8 @@ native_probe_metadata <- function() .Call(wrap__native_probe_metadata)
 #' @noRd
 native_probe_job <- function(milliseconds) .Call(wrap__native_probe_job, milliseconds)
 
+#' Offline sign-in metadata through the same conversion as pending jobs and errors.
+#' @noRd
+native_probe_login_targets <- function() .Call(wrap__native_probe_login_targets)
+
 # nolint end

@@ -193,16 +193,48 @@ test_that("a credential failure stops managed table discovery with one error", {
 })
 
 
+test_that("native profile login metadata omits absent config and session settings", {
+  targets <- native_probe_login_targets()
+  expect_identical(
+    targets$legacy,
+    list(profile = "synthetic", session = NULL, config = NULL)
+  )
+  expect_identical(
+    targets$profile,
+    list(profile = "synthetic", session = "synthetic-session", config = NULL)
+  )
+  expect_identical(targets$failure$sso_login, targets$legacy)
+  for (kind in c("legacy", "profile")) {
+    expected <- c(
+      "sso",
+      "login",
+      "--profile",
+      "synthetic",
+      if (kind == "profile") c("--sso-session", "synthetic-session"),
+      "--no-cli-pager",
+      "--no-cli-auto-prompt"
+    )
+    testthat::local_mocked_bindings(
+      aws_cli = function() "/synthetic/aws",
+      run_aws_cli = function(aws, args, env, job) {
+        expect_null(env)
+        expect_identical(args, expected)
+        0L
+      },
+      .package = "ckdata"
+    )
+    expect_message(aws_sso_login(targets[[kind]]), "Opening AWS SSO")
+  }
+})
+
 test_that("AWS CLI receives literal arguments and a private subprocess-only SSO configuration", {
   testthat::local_mocked_bindings(
     aws_cli = function() "/synthetic/aws",
     .package = "ckdata"
   )
-  target <- list(
-    profile = "workforce name; literal",
-    session = "SSO session",
-    config = "[sso-session SSO session]\nsso_region = us-west-1"
-  )
+  target <- native_probe_login_targets()$direct
+  target$profile <- "workforce name; literal"
+  target$session <- "SSO session"
   original <- Sys.getenv("AWS_CONFIG_FILE", unset = NA_character_)
   observed <- NULL
   testthat::local_mocked_bindings(
