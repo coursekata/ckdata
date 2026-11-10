@@ -2,15 +2,12 @@
 
 ## Package availability
 
-This repository has not published its first release. The R interface is
-implemented locally; Python query execution and wheel publication are still
-pending. The README describes the target interface for both languages. Its
-Python query example is not runnable with the current development build.
+The R installation commands below use tagged releases from CourseKata's
+R-universe. A new release becomes installable once its binary builds finish.
 
-Use [ckdata-r](https://github.com/coursekata/ckdata-r) for the published R package
-until this replacement completes acceptance and its first binary release.
-The release-channel commands below apply after publication; they do not select
-this development build today.
+Python query execution and wheel publication are still pending. The README's
+Python example describes the target interface and is not runnable with the
+current development build.
 
 ## R
 
