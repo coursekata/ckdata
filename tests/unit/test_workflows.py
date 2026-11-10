@@ -1,5 +1,6 @@
 """Execute publication guards with invented manifests and fake GitHub commands."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -44,6 +45,8 @@ def test_ci_success_must_belong_to_the_tagged_commit():
     script = script_after(
         "release.yml", "name: Require successful CI for the exact tagged commit"
     )
+    jq = shutil.which("jq")
+    assert jq is not None, "jq is required to execute the workflow's CI selector"
     with tempfile.TemporaryDirectory(prefix="ckdata-workflow-test-") as directory:
         directory = Path(directory)
         for name, body in {
@@ -53,7 +56,7 @@ def test_ci_success_must_belong_to_the_tagged_commit():
                 'print("synthetic-tagged-commit")'
             ),
             "gh": (
-                "import os, re, sys\n"
+                "import os, subprocess, sys\n"
                 "from urllib.parse import parse_qs, urlsplit\n"
                 "arguments = sys.argv[1:]\n"
                 'assert arguments.pop(0) == "api", sys.argv\n'
@@ -67,9 +70,8 @@ def test_ci_success_must_belong_to_the_tagged_commit():
                 "query = parse_qs(endpoint.query)\n"
                 'for key, value in {"head_sha": "synthetic-tagged-commit", "event": "push", "status": "success"}.items():\n'
                 "    assert query.get(key) == [value], query\n"
-                'normalized = "".join(re.findall(r\'"[^"]*"|\\S\', selector))\n'
-                "assert normalized == '.workflow_runs[]|select(.head_branch==\"main\")|.head_sha', selector\n"
-                'print(os.environ["SYNTHETIC_CI_SHA"])'
+                'subprocess.run([os.environ["SYNTHETIC_JQ"], "-r", selector],\n'
+                '    input=os.environ["SYNTHETIC_CI_RUNS"], text=True, check=True)'
             ),
         }.items():
             command = directory / name
@@ -79,12 +81,31 @@ def test_ci_success_must_belong_to_the_tagged_commit():
             "PATH": str(directory) + os.pathsep + os.environ["PATH"],
             "RUNNER_TEMP": str(directory),
             "GITHUB_REPOSITORY": "synthetic/client",
+            "SYNTHETIC_JQ": jq,
         }
         for commit, expected in (
             ("synthetic-other-commit", 1),
             ("synthetic-tagged-commit", 0),
         ):
-            result = run_script(script, env={**env, "SYNTHETIC_CI_SHA": commit})
+            runs = {
+                "workflow_runs": [
+                    {
+                        "head_branch": "main",
+                        "head_sha": commit,
+                        "status": "completed",
+                        "conclusion": "success",
+                    },
+                    {
+                        "head_branch": "synthetic-feature",
+                        "head_sha": "synthetic-tagged-commit",
+                        "status": "completed",
+                        "conclusion": "success",
+                    },
+                ]
+            }
+            result = run_script(
+                script, env={**env, "SYNTHETIC_CI_RUNS": json.dumps(runs)}
+            )
             assert result.returncode == expected, result.stderr
 
 

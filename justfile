@@ -10,7 +10,7 @@ _default:
 
 # Prepare development dependencies and install Git hooks; no AWS access.
 setup:
-    @for tool in rustup Rscript node npm actionlint gitleaks; do command -v "$tool" >/dev/null || { echo "Install $tool first; see docs/development.md" >&2; exit 1; }; done
+    @for tool in rustup Rscript node npm actionlint gitleaks jq; do command -v "$tool" >/dev/null || { echo "Install $tool first; see docs/development.md" >&2; exit 1; }; done
     if [ -d r/src/rust/target ]; then cargo clean --manifest-path r/src/rust/Cargo.toml --target-dir r/src/rust/target; fi
     rustup component add rustfmt clippy
     uv sync --locked --group bindings --all-packages --no-build-isolation-package ckdata

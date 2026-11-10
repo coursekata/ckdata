@@ -56,14 +56,18 @@ Python 3.11 or later is required. After wheel publication, install into your
 project's Python environment:
 
 ```sh
-python -m pip install ckdata pyarrow
+python -m pip install ckdata pyarrow pandas
 ```
 
-PyArrow is used by the README example. Use pandas, Polars or DuckDB in the same
+The README example uses PyArrow and pandas. Install Polars or DuckDB in the same
 environment when working with those libraries. A compatible wheel avoids a
 local Rust build. See Python's
 [package installation guide](https://docs.python.org/3/installing/index.html)
 for virtual environments and pip.
+
+For pandas, `result.to_pandas(types_mapper=pd.ArrowDtype)` preserves Arrow types,
+including nullable 64-bit integers. Default pandas conversion can convert those
+integers to floating point and lose precision.
 
 For the current native binding and its tests, use the repository's
 [development environment](development.md#python).
@@ -116,9 +120,10 @@ The old R package's connection variables remain supported:
 | `CKDATA_ROLE_ARN` | `CK_DATALAKE_ROLE_ARN` |
 | `CKDATA_OUTPUT_LOCATION` | `CK_DATALAKE_S3_STAGING_DIR` |
 
-A present canonical variable wins, including an empty value. For example,
-`CKDATA_ROLE_ARN=` masks an inherited legacy role. When the canonical variable
-is absent, its legacy alias is used. No AWS environment variable is rewritten.
+A nonempty canonical variable wins. Empty and absent variables both fall back
+to their legacy aliases on every platform. To bypass an inherited optional
+setting, pass an explicit `NULL` connection argument, such as `role_arn = NULL`.
+No AWS environment variable is rewritten.
 `CKDATA_PROFILE` and `CKDATA_REGION` are optional package-specific overrides;
 without them, standard AWS discovery applies.
 

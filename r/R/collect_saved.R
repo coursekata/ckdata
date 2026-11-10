@@ -163,7 +163,7 @@ saved_path <- function(dir, frozen, label, key) {
     if (frozen) {
       getOption("ckdata.snapshot_dir", ".")
     } else {
-      getOption("ckdata.saved_dir", file.path(tempdir(), "ckdata", "saved"))
+      getOption("ckdata.saved_dir", fs::path(tempdir(), "ckdata", "saved"))
     }
   dir <- single_string(dir, "dir")
   prefix <- if (frozen) {
@@ -171,7 +171,7 @@ saved_path <- function(dir, frozen, label, key) {
   } else {
     "result-"
   }
-  file.path(dir, paste0(prefix, key, ".parquet"))
+  fs::path(dir, paste0(prefix, key, ".parquet"))
 }
 
 saved_now <- function() Sys.time()
@@ -206,7 +206,7 @@ saved_source <- function(con, source) {
 }
 
 read_saved <- function(path, key, frozen) {
-  if (!file.exists(path)) {
+  if (!fs::file_exists(path)) {
     return(NULL)
   }
   rlang::try_fetch(
@@ -230,7 +230,7 @@ read_saved <- function(path, key, frozen) {
     },
     error = function(cnd) {
       # Another process may have removed a file between lookup and opening it.
-      if (file.exists(path)) {
+      if (fs::file_exists(path)) {
         if (frozen) {
           rlang::abort(
             paste0(
@@ -297,11 +297,11 @@ warn_stale <- function(saved, path, cnd) {
 }
 
 write_saved <- function(table, path, key, frozen, fetched_at, revision) {
-  dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
-  temporary <- tempfile(
-    ".ckdata-",
-    tmpdir = dirname(path),
-    fileext = ".parquet"
+  fs::dir_create(fs::path_dir(path))
+  temporary <- fs::file_temp(
+    pattern = ".ckdata-",
+    tmp_dir = fs::path_dir(path),
+    ext = ".parquet"
   )
   withr::defer(unlink(temporary))
   metadata <- table$schema$metadata

@@ -20,6 +20,27 @@ test_that("saved results reuse fresh files and refresh on request", {
   expect_length(fixture$calls$queries, 2L)
 })
 
+test_that("saved results and snapshots publish in directories containing spaces", {
+  local_saved_policy()
+  fixture <- local_saved_tbl(data.frame(x = 1L))
+  dir <- fs::path(withr::local_tempdir(), "saved results", "nested directory")
+
+  saved <- collect_saved(fixture$query, dir = dir)
+  snapshot <- collect_saved(fixture$query, snapshot = "baseline", dir = dir)
+  DBI::dbExecute(fixture$source, "INSERT INTO t VALUES (2)")
+  refreshed <- collect_saved(fixture$query, refresh = TRUE, dir = dir)
+
+  expect_identical(saved$x, 1L)
+  expect_identical(snapshot, saved)
+  expect_identical(refreshed$x, 1:2)
+  expect_identical(
+    collect_saved(fixture$query, snapshot = "baseline", dir = dir),
+    snapshot
+  )
+  expect_length(fixture$calls$queries, 3L)
+  expect_length(fs::dir_ls(dir, all = TRUE), 2L)
+})
+
 test_that("cached and fresh frames retain the current query's grouping", {
   local_saved_policy()
   fixture <- local_saved_tbl(data.frame(team = c("a", "a", "b"), x = 1:3))
@@ -326,8 +347,8 @@ test_that("snapshot and normal destinations remain separate and configurable", {
   )))
   withr::local_options(ckdata.saved_dir = NULL)
   expect_identical(
-    dirname(saved_path(NULL, FALSE, NULL, "key")),
-    file.path(tempdir(), "ckdata", "saved")
+    fs::path_norm(fs::path_dir(saved_path(NULL, FALSE, NULL, "key"))),
+    fs::path_norm(fs::path(tempdir(), "ckdata", "saved"))
   )
 })
 

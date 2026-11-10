@@ -38,10 +38,11 @@ or keep an indefinite snapshot for reproducibility. See the
 
 ```python
 import ckdata
+import pandas as pd
 import pyarrow as pa
 
 result = pa.table(ckdata.query("SELECT 1 AS example"))
-frame = result.to_pandas()
+frame = result.to_pandas(types_mapper=pd.ArrowDtype)
 ```
 
 Empty results retain their column types. Results do not guarantee row order

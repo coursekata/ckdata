@@ -20,10 +20,9 @@ The canonical environment names and compatibility aliases are:
 }
 
 
-A canonical variable takes precedence when present, including an empty value.
-An empty canonical value masks its legacy alias: an empty \code{CKDATA_ROLE_ARN},
-for example, disables an inherited additional role. If the canonical name is
-absent, the legacy name is read; an empty legacy value counts as unset.
+A nonempty canonical variable takes precedence over its legacy alias.
+Empty and absent variables both count as unset on every platform. To bypass
+an inherited optional setting, pass an explicit NULL connection argument.
 Aliases are resolved without changing the process's AWS environment.
 
 Both managed helpers and explicit DBI connections use this configuration.

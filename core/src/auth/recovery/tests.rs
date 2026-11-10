@@ -4,6 +4,13 @@ use aws_credential_types::{
     provider::error::{CredentialsError, TokenError},
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+async fn within_test_deadline<T>(future: impl Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_secs(2), future)
+        .await
+        .expect("synthetic credential recovery exceeded its test deadline")
+}
 
 #[derive(Debug)]
 struct Expired;
@@ -26,14 +33,18 @@ fn target() -> SsoLoginTarget {
     }
 }
 
-async fn answer(login: &SsoLogin, success: bool) {
-    loop {
-        if login.pending().is_some() {
-            login.complete(success);
-            return;
+async fn wait_for_login(login: &SsoLogin) {
+    within_test_deadline(async {
+        while login.pending().is_none() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-    }
+    })
+    .await;
+}
+
+async fn answer(login: &SsoLogin, success: bool) {
+    wait_for_login(login).await;
+    login.complete(success);
 }
 
 #[tokio::test]
@@ -55,10 +66,13 @@ async fn reauthentication_rebuilds_only_the_selected_provider_and_uses_one_login
     });
     let provider = RecoveringCredentials::new(factory, Some(target()));
     let login = SsoLogin::default();
-    let (credentials, ()) = tokio::join!(
-        login.scope(provider.provide_credentials()),
-        answer(&login, true)
-    );
+    let (credentials, ()) = within_test_deadline(async {
+        tokio::join!(
+            login.scope(provider.provide_credentials()),
+            answer(&login, true)
+        )
+    })
+    .await;
     assert_eq!(credentials.unwrap().access_key_id(), "RENEWED");
     assert_eq!(builds.load(Ordering::SeqCst), 2);
     assert!(login.pending().is_none());
@@ -67,8 +81,7 @@ async fn reauthentication_rebuilds_only_the_selected_provider_and_uses_one_login
         Some(target()),
     );
     assert!(
-        login
-            .scope(always_expired.provide_credentials())
+        within_test_deadline(login.scope(always_expired.provide_credentials()))
             .await
             .is_err()
     );
@@ -90,31 +103,38 @@ async fn disabled_failed_and_unsuccessful_reauthentication_never_loop_or_use_oth
         Some(target()),
     );
     assert!(
-        provider.provide_credentials().await.is_err(),
+        within_test_deadline(provider.provide_credentials())
+            .await
+            .is_err(),
         "no host scope means no login"
     );
     assert_eq!(builds.load(Ordering::SeqCst), 1);
     let disabled = SsoLogin::new(false);
     assert!(
-        disabled
-            .scope(provider.provide_credentials())
+        within_test_deadline(disabled.scope(provider.provide_credentials()))
             .await
             .is_err()
     );
     assert!(disabled.pending().is_none());
     assert_eq!(disabled.required(), Some(target()));
     let login = SsoLogin::default();
-    let (result, ()) = tokio::join!(
-        login.scope(provider.provide_credentials()),
-        answer(&login, false)
-    );
+    let (result, ()) = within_test_deadline(async {
+        tokio::join!(
+            login.scope(provider.provide_credentials()),
+            answer(&login, false)
+        )
+    })
+    .await;
     assert!(result.is_err());
     assert_eq!(builds.load(Ordering::SeqCst), 1);
     let login = SsoLogin::default();
-    let (result, ()) = tokio::join!(
-        login.scope(provider.provide_credentials()),
-        answer(&login, true)
-    );
+    let (result, ()) = within_test_deadline(async {
+        tokio::join!(
+            login.scope(provider.provide_credentials()),
+            answer(&login, true)
+        )
+    })
+    .await;
     assert!(result.is_err());
     assert_eq!(builds.load(Ordering::SeqCst), 2);
     assert!(login.pending().is_none());
@@ -136,8 +156,7 @@ async fn valid_credentials_and_unrelated_errors_do_not_request_interaction() {
         Some(target()),
     );
     assert_eq!(
-        login
-            .scope(provider.provide_credentials())
+        within_test_deadline(login.scope(provider.provide_credentials()))
             .await
             .unwrap()
             .access_key_id(),
@@ -160,7 +179,11 @@ async fn valid_credentials_and_unrelated_errors_do_not_request_interaction() {
         Arc::new(|| SharedCredentialsProvider::new(Denied)),
         Some(target()),
     );
-    assert!(login.scope(provider.provide_credentials()).await.is_err());
+    assert!(
+        within_test_deadline(login.scope(provider.provide_credentials()))
+            .await
+            .is_err()
+    );
     assert!(login.pending().is_none());
 }
 
@@ -172,7 +195,11 @@ async fn a_cancelled_host_cannot_publish_a_late_login_request() {
         Arc::new(|| SharedCredentialsProvider::new(Expired)),
         Some(target()),
     );
-    assert!(login.scope(provider.provide_credentials()).await.is_err());
+    assert!(
+        within_test_deadline(login.scope(provider.provide_credentials()))
+            .await
+            .is_err()
+    );
     assert!(login.pending().is_none());
     assert_eq!(login.required(), Some(target()));
 }
@@ -224,7 +251,7 @@ async fn sdk_signing_waits_for_host_login_then_sends_only_with_recovered_credent
     let login = SsoLogin::default();
     let request = client.get_work_group().work_group("synthetic");
     let (result, ()) = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+        Duration::from_secs(2),
         login.scope(async { tokio::join!(request.send(), answer(&login, true)) }),
     )
     .await
@@ -295,8 +322,9 @@ async fn interactive_sdk_recovery_allows_browser_time_instead_of_the_short_reque
         }))
         .build();
     let login = SsoLogin::default();
-    login
-        .scope(async {
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        login.scope(async {
             let connection = crate::Connection::from_auth(
                 crate::ConnectionOptions::new("synthetic", "schema"),
                 crate::auth::ConfiguredAuth {
@@ -308,14 +336,14 @@ async fn interactive_sdk_recovery_allows_browser_time_instead_of_the_short_reque
             .await
             .unwrap();
             let (result, ()) = tokio::join!(connection.workgroup_configuration(), async {
-                while login.pending().is_none() {
-                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                wait_for_login(&login).await;
+                tokio::time::sleep(Duration::from_secs(15)).await;
                 login.complete(true);
             });
             result.unwrap();
-        })
-        .await;
+        }),
+    )
+    .await
+    .expect("interactive recovery must finish within the synthetic browser deadline");
     assert_eq!(builds.load(Ordering::SeqCst), 2);
 }

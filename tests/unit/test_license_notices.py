@@ -117,8 +117,13 @@ def test_package_texts_keep_registry_and_declared_file_boundaries(
     package["license_file"] = str(outside)
     with pytest.raises(ValueError, match="License file escapes registry crate"):
         check_licenses.package_texts(package, {})
-    package["license_file"] = str(root / "Cargo.toml")
-    assert "Cargo.toml" in check_licenses.package_texts(package, {})
+    declared = root / "legal" / "grant.txt"
+    declared.parent.mkdir()
+    declared.write_text("Declared license text\n")
+    package["license_file"] = str(declared)
+    assert check_licenses.package_texts(package, {})["legal/grant.txt"] == (
+        "Declared license text\n"
+    )
     package["source"] = "git+https://example.invalid/crate"
     with pytest.raises(ValueError, match="Unsupported dependency source"):
         check_licenses.package_texts(package, {})

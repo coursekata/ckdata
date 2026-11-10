@@ -195,7 +195,7 @@ def _read_package_text(path, root, package_name, in_license_directory):
     is_notice = path.name.lower().startswith(PREFIXES) or in_license_directory
     if not is_notice and path.suffix.lower() not in SOURCE_SUFFIXES:
         return None
-    relative = str(path.relative_to(root))
+    relative = path.relative_to(root).as_posix()
     try:
         content = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
@@ -282,7 +282,7 @@ def package_texts(package, supplements):
         path = Path(license_file).resolve()
         if not path.is_relative_to(root):
             raise ValueError(f"License file escapes registry crate: {package['name']}")
-        texts[str(path.relative_to(root))] = path.read_text(encoding="utf-8")
+        texts[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
     texts.update(_supplement_texts(package, root, supplements))
     if not any(_is_license_text(name, content) for name, content in texts.items()):
         key = package["name"] + "@" + package["version"]

@@ -13,10 +13,9 @@
 #' | `CKDATA_ROLE_ARN` | `CK_DATALAKE_ROLE_ARN` |
 #' | `CKDATA_OUTPUT_LOCATION` | `CK_DATALAKE_S3_STAGING_DIR` |
 #'
-#' A canonical variable takes precedence when present, including an empty value.
-#' An empty canonical value masks its legacy alias: an empty `CKDATA_ROLE_ARN`,
-#' for example, disables an inherited additional role. If the canonical name is
-#' absent, the legacy name is read; an empty legacy value counts as unset.
+#' A nonempty canonical variable takes precedence over its legacy alias.
+#' Empty and absent variables both count as unset on every platform. To bypass
+#' an inherited optional setting, pass an explicit NULL connection argument.
 #' Aliases are resolved without changing the process's AWS environment.
 #'
 #' Both managed helpers and explicit DBI connections use this configuration.
@@ -75,7 +74,7 @@
 NULL
 
 # Resolve compatibility at the R configuration boundary, without changing the
-# process's AWS environment. An explicitly empty canonical value masks its alias.
+# process's AWS environment. Blank and absent settings use the same fallback.
 config_env <- function(name) {
   aliases <- c(
     CKDATA_PROFILE = "CK_DATALAKE_INTERNAL_PROFILE",
@@ -85,10 +84,10 @@ config_env <- function(name) {
     CKDATA_ROLE_ARN = "CK_DATALAKE_ROLE_ARN",
     CKDATA_OUTPUT_LOCATION = "CK_DATALAKE_S3_STAGING_DIR"
   )
-  value <- Sys.getenv(name, unset = NA_character_)
+  value <- Sys.getenv(name, unset = "")
   legacy <- unname(aliases[name])
-  if (is.na(value) && !is.na(legacy)) {
-    value <- Sys.getenv(legacy, unset = NA_character_)
+  if (!nzchar(value) && !is.na(legacy)) {
+    value <- Sys.getenv(legacy, unset = "")
   }
-  if (!is.na(value) && nzchar(value)) value else NULL
+  if (nzchar(value)) value else NULL
 }

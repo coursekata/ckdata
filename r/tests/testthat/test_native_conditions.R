@@ -83,7 +83,17 @@ test_that("native handle errors become rlang conditions with their cause", {
   expect_s3_class(cnd, "ckdata_native_error")
   expect_s3_class(cnd$parent, "error")
   expect_identical(
-    stringr::str_count(rlang::cnd_message(cnd), "invalid ckdata native handle"),
-    1L
+    conditionMessage(cnd$parent),
+    "invalid ckdata native handle"
   )
+  expect_gt(nrow(cnd$trace), 0L)
+})
+
+test_that("a cancelled native job signals an error with a trace", {
+  job <- native_probe_job(60000)
+  native_cancel(job)
+  cnd <- rlang::catch_cnd(native_wait(job), classes = "error")
+  expect_s3_class(cnd, "ckdata_native_error")
+  expect_gt(nrow(cnd$trace), 0L)
+  expect_false(cnd$remote_may_be_running)
 })

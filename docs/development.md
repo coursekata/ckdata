@@ -23,11 +23,12 @@ core; `R CMD build` copies that source into the package tarball.
 Install [Just](https://just.systems/man/en/),
 [Rust through rustup](https://rustup.rs), R 4.2 or later,
 [uv](https://docs.astral.sh/uv/getting-started/installation/), Node.js/npm,
-[Actionlint](https://github.com/rhysd/actionlint#installation) and
-[Gitleaks](https://github.com/gitleaks/gitleaks#installing). Just 1.46 or later
+[Actionlint](https://github.com/rhysd/actionlint#installation),
+[Gitleaks](https://github.com/gitleaks/gitleaks#installing) and jq. Just 1.46 or later
 is required for recipe flags; native builds require Rust 1.94.1 or later and
 the platform prerequisites in the installation guide. These executables must
 be on PATH. Just itself can be installed with `uv tool install rust-just`.
+The release-guard tests use jq to execute the workflow's actual result selector.
 
 ```sh
 just setup
@@ -222,3 +223,7 @@ git clone -c core.symlinks=true https://github.com/coursekata/ckdata.git
 
 Install matching Rtools and Rust's GNU target as described in the installation
 guide.
+
+From macOS or Linux, use the hosted Windows CI job to verify Windows runtime
+behavior. Docker Desktop on macOS runs a Linux VM; a Linux container cannot
+exercise Windows environment variables, paths or R console behavior.

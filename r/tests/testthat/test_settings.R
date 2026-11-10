@@ -10,6 +10,8 @@ test_that("the default database is generic and explicit source settings take pre
   expect_identical(ckdata_schema(), "my_project")
   withr::local_options(ckdata.schema = NULL)
   withr::local_envvar(CKDATA_SCHEMA = "")
+  expect_identical(ckdata_schema(), "public_demo")
+  withr::local_envvar(CK_DATALAKE_SCHEMA = "")
   expect_identical(ckdata_schema(), "default")
 })
 
@@ -101,7 +103,7 @@ test_that("legacy and canonical connection settings reach the native boundary wi
   expect_identical(Sys.getenv(c("AWS_PROFILE", "AWS_REGION")), aws)
 })
 
-test_that("empty canonical settings mask legacy aliases and missing workgroups fail before connecting", {
+test_that("missing and blank workgroups fail before opening a native connection", {
   fixture <- local_native_connection()
   withr::local_options(
     ckdata.workgroup = NULL,
@@ -109,36 +111,13 @@ test_that("empty canonical settings mask legacy aliases and missing workgroups f
     ckdata.login = FALSE
   )
   withr::local_envvar(c(
-    CKDATA_PROFILE = "",
-    CKDATA_REGION = "",
-    CKDATA_ROLE_ARN = "",
-    CKDATA_OUTPUT_LOCATION = "",
-    CKDATA_SCHEMA = "",
-    CKDATA_WORKGROUP = "",
-    CK_DATALAKE_INTERNAL_PROFILE = "legacy",
-    CK_DATALAKE_REGION = "eu-west-1",
-    CK_DATALAKE_ROLE_ARN = "arn:aws:iam::000000000000:role/legacy",
-    CK_DATALAKE_S3_STAGING_DIR = "s3://synthetic-legacy-results/",
-    CK_DATALAKE_SCHEMA = "legacy",
-    CK_DATALAKE_WORKGROUP = "legacy"
+    CKDATA_WORKGROUP = NA,
+    CK_DATALAKE_WORKGROUP = NA
   ))
   expect_error(DBI::dbConnect(ckdata()), "set CKDATA_WORKGROUP")
+  withr::local_envvar(CKDATA_WORKGROUP = "", CK_DATALAKE_WORKGROUP = "")
+  expect_error(DBI::dbConnect(ckdata()), "set CKDATA_WORKGROUP")
   expect_length(fixture$calls$connections, 1L)
-  con <- DBI::dbConnect(ckdata(), workgroup = "explicit")
-  withr::defer(DBI::dbDisconnect(con))
-  expect_identical(
-    tail(fixture$calls$connections, 1)[[1]],
-    list(
-      workgroup = "explicit",
-      schema = "default",
-      profile = NULL,
-      region = NULL,
-      role_arn = NULL,
-      output_location = NULL,
-      sso = list(),
-      login = FALSE
-    )
-  )
 })
 
 test_that("managed table and SQL helpers share the configured session", {
@@ -188,17 +167,22 @@ test_that("configuration changes replace a managed connection only after explici
   withr::local_envvar(CK_DATALAKE_ROLE_ARN = NA)
   expect_true(DBI::dbIsValid(fixture$con))
   expect_identical(lake_con(), fixture$con)
+  withr::local_options(ckdata.workgroup = "changed-workgroup")
+  expect_identical(lake_con(), fixture$con)
   expect_silent(lake_query("SELECT 1"))
   expect_identical(fixture$calls$queries, "SELECT 1")
   expect_length(fixture$calls$connections, 1L)
   expect_true(lake_disconnect())
-  expect_false(fixture$con@state$open)
+  expect_false(DBI::dbIsValid(fixture$con))
   expect_true(lake_disconnect())
   replacement <- lake_con()
   withr::defer(lake_disconnect())
-  expect_false(rlang::is_reference(replacement@state, fixture$con@state))
   expect_length(fixture$calls$connections, 2L)
   expect_true(DBI::dbIsValid(replacement))
+  expect_identical(
+    tail(fixture$calls$connections, 1)[[1]]$workgroup,
+    "changed-workgroup"
+  )
 })
 
 test_that("disconnecting an unused managed session never opens a connection", {

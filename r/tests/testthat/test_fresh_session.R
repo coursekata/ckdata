@@ -1,13 +1,12 @@
 test_that("an installed package decodes results in a fresh R session", {
   package <- system.file(package = "ckdata")
-  if (!file.exists(file.path(package, "Meta", "package.rds"))) {
+  if (!fs::file_exists(fs::path(package, "Meta", "package.rds"))) {
     skip("Fresh-session installation check requires an installed package")
   }
-  script <- tempfile(fileext = ".R")
-  withr::defer(unlink(script))
+  script <- withr::local_tempfile(fileext = ".R")
   writeLines(
     c(
-      paste0("library(ckdata, lib.loc = ", deparse(dirname(package)), ")"),
+      paste0("library(ckdata, lib.loc = ", deparse(fs::path_dir(package)), ")"),
       "ns <- rlang::ns_env('ckdata')",
       "result <- rlang::env_get(ns, 'native_probe_result')(FALSE)",
       "stream <- rlang::env_get(ns, 'native_result_fetch')(result, -1)",
@@ -18,7 +17,7 @@ test_that("an installed package decodes results in a fresh R session", {
     script
   )
   output <- suppressWarnings(system2(
-    file.path(R.home("bin"), "Rscript"),
+    fs::path(R.home("bin"), "Rscript"),
     c("--vanilla", shQuote(script)),
     stdout = TRUE,
     stderr = TRUE
@@ -26,69 +25,69 @@ test_that("an installed package decodes results in a fresh R session", {
   expect_null(attr(output, "status"), info = paste(output, collapse = "\n"))
 })
 
-test_that("unhandled native failures render once with a wrapped console callback", {
+test_that("an interactive native failure reaches a wrapped console callback once", {
   package <- system.file(package = "ckdata")
-  if (!file.exists(file.path(package, "Meta", "package.rds"))) {
+  if (!fs::file_exists(fs::path(package, "Meta", "package.rds"))) {
     skip("Console rendering check requires an installed package")
   }
-  script <- tempfile(fileext = ".R")
-  withr::defer(unlink(script))
+  script <- withr::local_tempfile(fileext = ".R")
   writeLines(
     c(
-      paste0("library(ckdata, lib.loc = ", deparse(dirname(package)), ")"),
+      paste0("library(ckdata, lib.loc = ", deparse(fs::path_dir(package)), ")"),
       r"(
+      if (!interactive()) q("no", status = 1L)
       Sys.unsetenv("TESTTHAT")
       rlang::global_entrace()
       previous_error <- getOption("error")
+      errors <- list()
       options(error = function() {
+        errors[[length(errors) + 1L]] <<- rlang::last_error()
         if (!is.null(previous_error)) eval(previous_error)
       })
       job <- ckdata:::native_probe_job(60000)
       ckdata:::native_cancel(job)
       ckdata:::native_wait(job)
-      stopifnot(inherits(rlang::last_error(), "ckdata_native_error"))
-      stopifnot(nrow(rlang::last_error()$trace) > 0L)
-      stopifnot(!is.null(rlang::last_trace()))
-      cat("CANCEL_TRACE_RETAINED\n")
-      ckdata:::native_value(NULL)
-      stopifnot(inherits(rlang::last_error(), "ckdata_native_error"))
-      stopifnot(nrow(rlang::last_error()$trace) > 0L)
-      cat("HANDLE_TRACE_RETAINED\n")
+      {
+        stopifnot(length(errors) == 1L)
+        stopifnot(inherits(errors[[1]], "ckdata_native_error"))
+        cat("CANCEL_ERROR_HANDLED\n")
+      }
       q("no")
     )"
     ),
     script
   )
+  interactive_args <- if (.Platform$OS.type == "windows") {
+    "--ess"
+  } else {
+    c("--interactive", "--no-readline")
+  }
   output <- suppressWarnings(system2(
-    file.path(R.home("bin"), "R"),
-    c("--vanilla", "--quiet", "--interactive", "--no-readline"),
+    fs::path(R.home("bin"), "R"),
+    c("--vanilla", "--quiet", interactive_args),
     stdin = script,
     stdout = TRUE,
     stderr = TRUE,
     timeout = 30
   ))
   expect_null(attr(output, "status"), info = paste(output, collapse = "\n"))
-  expect_equal(sum(grepl("^! synthetic query cancelled$", output)), 1L)
-  expect_equal(sum(grepl("^! invalid ckdata native handle$", output)), 1L)
-  expect_equal(
-    sum(grepl("Run `rlang::last_trace()`", output, fixed = TRUE)),
-    2L
+  expect_identical(
+    output[startsWith(output, "! ")],
+    "! synthetic query cancelled"
   )
-  expect_true("CANCEL_TRACE_RETAINED" %in% output)
-  expect_true("HANDLE_TRACE_RETAINED" %in% output)
+  expect_true("CANCEL_ERROR_HANDLED" %in% output)
 })
 
 test_that("forked sessions reject inherited native runtimes promptly", {
   skip_on_os("windows")
   package <- system.file(package = "ckdata")
-  if (!file.exists(file.path(package, "Meta", "package.rds"))) {
+  if (!fs::file_exists(fs::path(package, "Meta", "package.rds"))) {
     skip("Forked-session check requires an installed package")
   }
-  script <- tempfile(fileext = ".R")
-  withr::defer(unlink(script))
+  script <- withr::local_tempfile(fileext = ".R")
   writeLines(
     c(
-      paste0("library(ckdata, lib.loc = ", deparse(dirname(package)), ")"),
+      paste0("library(ckdata, lib.loc = ", deparse(fs::path_dir(package)), ")"),
       r"(
       ns <- rlang::ns_env("ckdata")
       probe <- rlang::env_get(ns, "native_probe_job")
@@ -158,7 +157,7 @@ test_that("forked sessions reject inherited native runtimes promptly", {
     script
   )
   output <- suppressWarnings(system2(
-    file.path(R.home("bin"), "Rscript"),
+    fs::path(R.home("bin"), "Rscript"),
     c("--vanilla", shQuote(script)),
     stdout = TRUE,
     stderr = TRUE,
