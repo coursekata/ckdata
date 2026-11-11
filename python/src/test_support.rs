@@ -38,3 +38,19 @@ pub(super) fn arrow_fixture() -> PyResult<PyRecordBatchReader> {
     let reader = RecordBatchIterator::new(std::iter::once(Ok(batch)), schema);
     Ok(PyRecordBatchReader::new(Box::new(reader)))
 }
+
+/// A pending worker for exercising Python interrupts without AWS access.
+#[pyfunction]
+#[pyo3(name = "_pending_job")]
+pub(super) fn pending_job() -> PyResult<super::bridge::NativeJob> {
+    let cancellation = ckdata::QueryCancellation::new();
+    let cancel = cancellation.clone();
+    super::bridge::spawn(cancellation, false, async move {
+        cancel.cancelled().await;
+        Err(ckdata::Error::QueryInterrupted {
+            query_id: Some("synthetic".into()),
+            reason: ckdata::QueryInterruption::Cancelled,
+            cancellation: ckdata::CancellationStatus::Requested,
+        })
+    })
+}

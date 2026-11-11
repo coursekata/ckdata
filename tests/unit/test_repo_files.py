@@ -57,8 +57,8 @@ def test_style_preserves_generated_notices_and_ignored_or_linked_files(repositor
     (repository / ".gitignore").write_text("ignored/\n")
     for path in (
         "ignored/example.py",
-        "python/THIRD_PARTY_NOTICES.txt",
-        "scripts/licenses/upstream/example.txt",
+        "python/THIRD_PARTY_LICENSES.txt",
+        "NOTICE",
     ):
         target = repository / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +79,7 @@ def test_style_preserves_generated_notices_and_ignored_or_linked_files(repositor
     assert result.returncode == 0, result.stderr
     assert external.read_bytes() == b"preserve this  \n\n"
     assert (
-        repository / "python/THIRD_PARTY_NOTICES.txt"
+        repository / "python/THIRD_PARTY_LICENSES.txt"
     ).read_bytes() == b"preserve this  \n\n"
     assert (repository / "ignored/example.py").read_bytes() == b"preserve this  \n\n"
 

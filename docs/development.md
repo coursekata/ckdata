@@ -85,10 +85,24 @@ It runs the extendr generator from `r/src`, then roxygen2 through devtools.
 enforces the minimum Rust version.
 
 Python requires 3.11 or later. The root `pyproject.toml` and `uv.lock` define
-one development environment. The `bindings` group supplies maturin, PyArrow,
-dataframe libraries and pytest. Setup and Python tests install locked build
+one development environment. The `bindings` group installs the local package's
+Ibis extra, maturin, dataframe libraries and pytest. Setup and Python tests install locked build
 tools through uv before compiling the binding. Distribution builds use the
 backend's isolated build path.
+
+The mixed Python package lives in `python/ckdata/`; its private `_native`
+extension is the PyO3 adapter. R/dbplyr and Python/Ibis inspect lazy queries and apply column selection.
+Rust owns the shared column-policy decisions and bundled change catalog. The Rust core has no dependency on either query library.
+`r/data-raw/column_changes.R` regenerates the shared catalog from the same upstream metadata file.
+
+CI builds abi3 wheels for Linux x86_64 (manylinux 2.28), macOS arm64/x86_64 and
+Windows x86_64. Each installed wheel runs its package tests under CPython 3.11
+and 3.15, without building Rust in the test environment. To check a local wheel:
+
+```sh
+uv build --out-dir dist
+just _check-wheel 3.11
+```
 
 ### Windows
 
@@ -126,8 +140,8 @@ responses. Writes and transactions are outside the read-only backend's scope.
 
 ### Synthetic AWS smoke tests
 
-The opt-in `r/tests/testthat/test_live_*.R` tests exercise the real reader against
-invented data. Provisioning and fixture permission tests belong to ck-datalake's
+The opt-in R `test_live_*.R` and Python `python/tests/test_live.py` tests exercise
+the real reader against invented data. Provisioning and fixture permission tests belong to ck-datalake's
 independent `environments/ckdata-test` environment. Its deployment contract
 identifies the restricted roles, workgroups and invented `types` table.
 
@@ -135,6 +149,7 @@ With the local package installed, supply the contract and selected seat:
 
 ```sh
 CKDATA_TEST_DEPLOYMENT=/absolute/path/to/ckdata-test-deployment.json \
+CKDATA_TEST_PROFILE=your-synthetic-source-profile \
 CKDATA_TEST_SEAT=internal just test-acceptance
 ```
 
@@ -160,11 +175,12 @@ SQL option. Credential renewal uses offline tests with a virtual clock.
 Real-role/enclave checks and elapsed-hour expiry remain final BB-6313 acceptance;
 any real-data query needs Adam's prior approval and must use aggregates without PII.
 
-The remaining manual smoke check is browser launch: from an interactive R session
+The remaining manual smoke check is browser launch: from an interactive R or Python session
 with synthetic SSO settings and expired or absent credentials, the first
 connection should open AWS sign-in and resume after it completes. Package loading
 must not authenticate. Browser process handling, cancellation, precedence and
-renewal are covered by unit tests; `login = FALSE` suppresses browser interaction.
+renewal are covered by unit tests; R's `login = FALSE` or Python's `login=False`
+suppresses browser interaction.
 
 ## Shared core API and defaults
 
@@ -182,12 +198,12 @@ transfers the Arrow reader. AWS providers renew credentials; hosts service
 `SsoLogin` requests without restarting the native query job. The core does not
 sort results or promise an out-of-core memory bound.
 
-The R adapter maps legacy environment aliases in `r/R/settings.R` without
+The R adapter maps legacy environment aliases without
 rewriting `AWS_*` settings. Managed helpers and DBI use the same defaults;
 Rust receives explicit settings. No CourseKata account, role, region, output
 bucket, freshness schedule or production database is selected automatically.
 A workgroup is required; schema defaults to `default` and the catalog is
-`AwsDataCatalog`. The Python query configuration interface is still pending.
+`AwsDataCatalog`.
 
 ## Releases
 
@@ -197,7 +213,7 @@ R releases use CourseKata's R-universe registry with `subdir: r` and
 1. Update `core/Cargo.toml`, `python/Cargo.toml`, `r/src/rust/Cargo.toml`,
    `r/DESCRIPTION` and `r/NEWS.md` together. Refresh the native lockfiles with
    `cargo update --workspace` in both workspaces.
-2. Run `python3 scripts/check_licenses.py --write` and review the notice changes.
+2. Run `just licenses` and review the dependency license changes.
    Merge the version change and wait for successful CI on that main commit.
 3. Create and push a lightweight `vX.Y.Z` tag pointing to that commit. The release
    workflow requires `R_RELEASE_READY=true`, matching versions and successful
@@ -205,8 +221,12 @@ R releases use CourseKata's R-universe registry with `subdir: r` and
 4. R-universe builds and checks the R package. Review the release's
    [platform check results](https://coursekata.r-universe.dev/ckdata#checktable).
 
-Never move a release tag. Release a new version for a fix. When changing the
-release compiler,
-run `python3 scripts/check_licenses.py --runtime-write --write` and review its
-provenance and licenses. `--archive /absolute/path/to/package` checks notices in
-a wheel, source archive or R tarball.
+Never move a release tag. Release a new version for a fix.
+
+Dependency reports use [cargo-about](https://embarkstudios.github.io/cargo-about/).
+Maintainers can install the generator with
+`cargo install cargo-about --version 0.9.3 --locked --features cli` before running
+`just licenses`. Review `NOTICE` for additional upstream attributions when
+dependencies change. The reports are committed so source installations do not
+require the generator. Each R/Python build packages the standard-library notices
+from its selected Rust compiler; those generated files are ignored by Git.

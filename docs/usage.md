@@ -142,19 +142,77 @@ without replacement and return the first published result. No lock service is us
 
 ## Queries in Python
 
-`ckdata.query(sql)` exposes an Arrow result that PyArrow can consume:
+The public command names match R. `lake_tbl()` returns an ordinary Ibis table;
+Ibis builds the query and ckdata's Rust core executes it:
 
 ```python
 import ckdata
-import pyarrow as pa
+import ibis
 
-table = pa.table(ckdata.query("SELECT 1 AS example"))
-frame = table.to_pandas()
+classes = ckdata.lake_tbl("mart_classes")
+query = classes.aggregate(n=classes.count())
+ckdata.show_query(query)
+table = ckdata.collect(query)
+
+# Filter, select or join before downloading; small lookups stay inline.
+lookup = ibis.memtable({"example_id": [1, 2], "label": ["first", "second"]})
+direct = ckdata.lake_query("SELECT 1 AS example")
 ```
 
-Keep the Arrow table when you need its original types, or pass it to your
-preferred dataframe library. Library-specific conversions can change precision
-or representations.
+`collect()` returns a PyArrow Table. Ibis's native `to_pyarrow()` and
+`execute()` also use the shared reader; `execute()` returns pandas with Arrow
+dtypes. For an explicit connection, use `with ckdata.connect(...) as con:` and
+`con.table(...)`, `con.list_tables()`, `con.list_fields(table)` or
+`lake_query(sql, con=con)`. Discovery uses catalog metadata rather than row queries.
+
+```python
+import pandas as pd
+import polars as pl
+import duckdb
+
+frame = table.to_pandas(types_mapper=pd.ArrowDtype)
+polars_frame = pl.from_arrow(table)
+local_query = duckdb.from_arrow(table)
+```
+
+Keep Arrow dtypes when exact integers or decimals matter. Ordinary pandas
+conversion can turn nullable integers into floating point. Arrow retains nested
+arrays, maps and structs; each dataframe library has its own representations.
+
+Pass positional scalar values to `lake_query(sql, params=[...])`. Strings,
+booleans, signed 64-bit integers, floats, Decimal, bytes, dates, datetimes and
+times use Athena's native parameter API. A timezone-aware datetime is converted
+to UTC. Python `None` is SQL NULL; cast it explicitly when its output type cannot
+be inferred. Ibis parameters use a mapping, for example
+`collect(query, params={parameter: value})`. `timeout` is in seconds; interrupting
+collection requests cancellation and waits for the core's stop result.
+
+### Python saved results and column modes
+
+```python
+ckdata.configure(freshness=ckdata.daily_at("07:00", "America/Los_Angeles"))
+saved = ckdata.collect_saved(query)
+snapshot = ckdata.collect_saved(query, snapshot="baseline", dir="snapshots")
+```
+
+Freshness follows the same collection → table → connection → application →
+environment precedence as R. Use `freshness="always"`, `refresh=True`, or
+`freshness_check(check, every=300)` with the same meaning as in R. Ordinary
+`collect()` always fetches. Normal saved results use a session temporary
+directory; `configure(saved_dir=...)` changes it. Snapshots default to the
+working directory; `configure(snapshot_dir=...)` changes that default. Failure
+and concurrent-publication behavior follows [Saved results](#saved-results).
+Other Ibis backends require an explicit `source` mapping identifying the
+database/namespace and access context. Files use ordinary cross-language Parquet;
+lookup identities include exact generated SQL and backend/source information.
+
+`configure(mode="audit")` warns about deprecated or staging/intermediate
+columns. `mode="publish"` additionally removes identifiable flagged outputs;
+`allow={"table": ["column"]}` retains explicit exceptions. The default
+`mode="explore"` bypasses checks. These match R's heuristics: aliases and derived
+outputs can warn without being removed, and direct `lake_query()` SQL bypasses
+column checks. Both packages modify their native lazy queries; Rust handles
+execution without depending on dbplyr or Ibis.
 
 ## Types, empty results and ordering
 
@@ -192,3 +250,6 @@ lazy queries retain their original connection.
 For parallel R work, use fresh sessions or PSOCK workers and connect inside each
 worker. Forking after ckdata's native runtime starts cannot safely inherit the
 worker and is rejected.
+For Python multiprocessing, use the `spawn` context and connect inside each
+worker. Explicit connections can be used by separate threads; each operation
+owns its cancellation and sign-in state.

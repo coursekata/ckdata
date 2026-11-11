@@ -4,10 +4,10 @@ pre-commit:
   piped: true
   jobs:
     - name: formatting
-      run: uv run --locked just fmt --check
+      run: uv run --locked --only-group dev just fmt --check
     - name: staged-secrets
-      run: uv run --locked python scripts/repo-files.py secrets
+      run: uv run --locked --only-group dev python scripts/repo-files.py secrets
 pre-push:
   jobs:
     - name: local-checks
-      run: uv run --locked just check
+      run: uv run --locked --only-group dev just check

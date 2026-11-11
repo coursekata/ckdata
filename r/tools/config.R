@@ -3,6 +3,35 @@
 
 # Cargo enforces the rust-version declared in the Rust manifests.
 
+# Keep the standard library's notices from the compiler that builds this package.
+rustc <- Sys.getenv("RUSTC", unset = "rustc")
+sysroot <- system2(rustc, c("--print", "sysroot"), stdout = TRUE)
+if (length(sysroot) != 1L || !is.null(attr(sysroot, "status"))) {
+  stop("Could not locate the build compiler's Rust notices.", call. = FALSE)
+}
+rust_docs <- file.path(sysroot, "share", "doc", "rust")
+rust_notices <- file.path("inst", "licenses", "rust")
+if (dir.exists(rust_notices) && unlink(rust_notices, recursive = TRUE) != 0L) {
+  stop("Could not refresh the generated Rust notices.", call. = FALSE)
+}
+dir.create(rust_notices, recursive = TRUE, showWarnings = FALSE)
+copied <- file.copy(
+  file.path(rust_docs, c("COPYRIGHT-library.html", "licenses")),
+  rust_notices,
+  recursive = TRUE,
+  overwrite = TRUE
+)
+if (!all(copied)) {
+  stop(
+    "Rust standard-library notices are missing from the selected toolchain.",
+    call. = FALSE
+  )
+}
+writeLines(
+  system2(rustc, "-vV", stdout = TRUE),
+  file.path(rust_notices, "rustc.txt")
+)
+
 # check DEBUG and NOT_CRAN environment variables
 env_debug <- Sys.getenv("DEBUG")
 env_not_cran <- Sys.getenv("NOT_CRAN")

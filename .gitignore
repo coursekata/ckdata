@@ -1,11 +1,14 @@
 target/
 dist/
 *.whl
+*.so
+*.pyd
 __pycache__/
 .venv/
 
 .pytest_cache/
 .local/
-node_modules/
+node_modules
 .ruff_cache/
 lefthook-local.yml
+r/inst/licenses/rust/

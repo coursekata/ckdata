@@ -1,0 +1,76 @@
+# Dependency reports use cargo-about, retaining build and transitive dependencies.
+accepted = [
+    "MIT", "Apache-2.0", "ISC", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "MIT-0",
+    "BSL-1.0", "Zlib", "Unicode-3.0", "Unlicense", "CC0-1.0",
+    "Apache-2.0 WITH LLVM-exception",
+]
+ignore-dev-dependencies = true
+private = { ignore = true }
+
+[base64-simd.clarify]
+license = "MIT"
+override-git-commit = "d74c030d9dc4f3cae02146d1f497ff62726ef09a"
+
+[[base64-simd.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
+
+[extendr-api.clarify]
+license = "MIT"
+override-git-commit = "564d0de80ba6cff3f8c04e3b3e336d1346590ec6"
+
+[[extendr-api.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "fb9c2cccbdcb61ea51e0d553a6474297031544104985279c5c32d25c5c99977e"
+
+[extendr-ffi.clarify]
+license = "MIT"
+override-git-commit = "4848773321e9905f0426d12878b0c212085d4814"
+
+[[extendr-ffi.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "fb9c2cccbdcb61ea51e0d553a6474297031544104985279c5c32d25c5c99977e"
+
+[extendr-macros.clarify]
+license = "MIT"
+override-git-commit = "4848773321e9905f0426d12878b0c212085d4814"
+
+[[extendr-macros.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "fb9c2cccbdcb61ea51e0d553a6474297031544104985279c5c32d25c5c99977e"
+
+[flatbuffers.clarify]
+license = "Apache-2.0"
+override-git-commit = "7e163021e59cca4f8e1e35a7c828b5c6b7915953"
+
+[[flatbuffers.clarify.git]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[pyo3-arrow.clarify]
+license = "MIT OR Apache-2.0"
+override-git-commit = "3cb8549ccd536bdfae20f1111c9921c0a8789549"
+
+[[pyo3-arrow.clarify.git]]
+path = "LICENSE_MIT"
+license = "MIT"
+checksum = "a429abe835dbbe9227152b9af6116337bb2609ed15947e3288221abf939b278e"
+
+[[pyo3-arrow.clarify.git]]
+path = "LICENSE_APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[vsimd.clarify]
+license = "MIT"
+override-git-commit = "d74c030d9dc4f3cae02146d1f497ff62726ef09a"
+
+[[vsimd.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"

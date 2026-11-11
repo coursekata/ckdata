@@ -11,7 +11,7 @@ from pathlib import Path
 from identify.identify import tags_from_path
 
 EXCLUDE_PRIVATE = ":(glob,exclude)**/*[sS][aA][gG][aA]*/**"
-LEGAL = {"THIRD_PARTY_NOTICES.txt", "RUST_RUNTIME_NOTICES.html"}
+LEGAL = {"THIRD_PARTY_LICENSES.txt", "NOTICE"}
 
 
 def files(*, staged=False):
@@ -57,11 +57,7 @@ def run(module, paths, *arguments):
 
 def style(paths, *, fix):
     paths = [
-        p
-        for p in paths
-        if p.name not in LEGAL
-        and not p.is_relative_to("scripts/licenses/upstream")
-        and "text" in tags_from_path(str(p))
+        p for p in paths if p.name not in LEGAL and "text" in tags_from_path(str(p))
     ]
     if fix:
         # These hooks return 1 when they successfully change a file.

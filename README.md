@@ -6,13 +6,13 @@ Query Amazon Athena from R or Python. ckdata runs read-only SQL
 queries and brings Parquet results into your analysis through Apache Arrow.
 
 In R, use dplyr and dbplyr to build lazy queries, or use SQL through DBI. In
-Python, use SQL and consume results with PyArrow, pandas, Polars or DuckDB.
+Python, use Ibis or SQL and consume results with PyArrow, pandas, Polars or DuckDB.
 Both packages share the same Rust query engine.
 
 ## Installation and configuration
 
 Follow the [installation and setup guide](docs/installation.md) for package
-availability, installation and AWS configuration. R can open your configured
+availability, installation and AWS configuration. Both packages can open your configured
 AWS SSO sign-in in the browser when the first connection needs it.
 
 ### R
@@ -40,12 +40,19 @@ or keep an indefinite snapshot for reproducibility. See the
 
 ```python
 import ckdata
-import pandas as pd
-import pyarrow as pa
 
-result = pa.table(ckdata.query("SELECT 1 AS example"))
-frame = result.to_pandas(types_mapper=pd.ArrowDtype)
+classes = ckdata.lake_tbl("mart_classes")
+query = classes.aggregate(n=classes.count())
+
+ckdata.show_query(query)
+result = ckdata.collect(query)  # Arrow Table
+
+# Or write SQL directly
+ckdata.lake_query("SELECT 1 AS example")
 ```
+
+Python uses the same `collect_saved()` vocabulary for freshness and snapshots.
+See the [usage guide](docs/usage.md#queries-in-python) for dataframe conversions.
 
 Empty results retain their column types. Results do not guarantee row order
 across Athena's output files; sort after retrieval when local order matters.
