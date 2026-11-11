@@ -61,7 +61,12 @@ class Settings(BaseModel):
     @field_validator("allow")
     @classmethod
     def normalize_allow(cls, value):
-        return {table: tuple(columns) for table, columns in value.items()}
+        return {
+            table: tuple(sorted(columns))
+            if isinstance(columns, (set, frozenset))
+            else tuple(columns)
+            for table, columns in value.items()
+        }
 
     @field_validator("freshness")
     @classmethod
