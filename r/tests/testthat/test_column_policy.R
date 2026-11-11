@@ -64,6 +64,16 @@ test_that("publish mode removes the deprecated columns a query would return", {
   expect_equal(colnames(out), c("class_id", "question_type"))
 })
 
+test_that("publish removes a flagged grouping column and preserves other groups", {
+  query <- dplyr::group_by(responses, lrn_type, question_type)
+  expect_warning(
+    out <- check(query, responses, mode = "publish"),
+    class = flagged
+  )
+  expect_equal(colnames(out), c("class_id", "question_type"))
+  expect_equal(dplyr::group_vars(out), "question_type")
+})
+
 test_that("publish mode removes deprecated columns that come through a join", {
   names <- simulated_tbl("mart_classes", c("class_id", "class_name"))
   x <- dplyr::left_join(responses, names, by = "class_id")

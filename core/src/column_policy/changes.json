@@ -1,0 +1,548 @@
+[
+  {
+    "table": "mart_active_users",
+    "column": "active_users",
+    "new_table": "mart_active_users",
+    "new_column": "n_active_users",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_active_users",
+    "column": "billable_users",
+    "new_table": "mart_active_users",
+    "new_column": "n_billable_users",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_active_users",
+    "column": "period_start",
+    "new_table": "mart_active_users",
+    "new_column": "period_start_date",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_classes",
+    "column": "book",
+    "new_table": "mart_classes",
+    "new_column": "book_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_classes",
+    "column": "course_name",
+    "new_table": "mart_classes",
+    "new_column": "course_repository",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_classes",
+    "column": "pct_students_active",
+    "new_table": "mart_classes",
+    "new_column": "proportion_students_active",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_classes",
+    "column": "release",
+    "new_table": "mart_classes",
+    "new_column": "release_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_classes",
+    "column": "setup_yaml",
+    "new_table": "mart_classes",
+    "new_column": "book_details_json",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_classes",
+    "column": "teacher_id",
+    "new_table": "mart_classes",
+    "new_column": "owner_id",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_institutions",
+    "column": "pooled_institution_count",
+    "new_table": "mart_institutions",
+    "new_column": "n_pooled_institutions",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "access_count",
+    "new_table": "mart_media_views",
+    "new_column": "n_accesses",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "chapter",
+    "new_table": "mart_media_views",
+    "new_column": "chapter_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "dt_last_event",
+    "new_table": "mart_media_views",
+    "new_column": "last_event_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "dt_started",
+    "new_table": "mart_media_views",
+    "new_column": "started_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "included_in_research",
+    "new_table": "mart_media_views",
+    "new_column": "is_included_in_research",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "media_id",
+    "new_table": "mart_media_views",
+    "new_column": "video_reference",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "page",
+    "new_table": "mart_media_views",
+    "new_column": "page_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_media_views",
+    "column": "type",
+    "new_table": "mart_media_views",
+    "new_column": "video_provider",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "chapter",
+    "new_table": "mart_page_views",
+    "new_column": "chapter_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "dt_accessed",
+    "new_table": "mart_page_views",
+    "new_column": "accessed_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "engaged",
+    "new_table": "mart_page_views",
+    "new_column": "engaged_ms",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "idle_brief",
+    "new_table": "mart_page_views",
+    "new_column": "idle_brief_ms",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "idle_long",
+    "new_table": "mart_page_views",
+    "new_column": "idle_long_ms",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "included_in_research",
+    "new_table": "mart_page_views",
+    "new_column": "is_included_in_research",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "off_page_brief",
+    "new_table": "mart_page_views",
+    "new_column": "off_page_brief_ms",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "off_page_long",
+    "new_table": "mart_page_views",
+    "new_column": "off_page_long_ms",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "page",
+    "new_table": "mart_page_views",
+    "new_column": "page_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "trace",
+    "new_table": "mart_page_views",
+    "new_column": "trace_json",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "tried_again_clicks",
+    "new_table": "mart_page_views",
+    "new_column": "n_tried_again_clicks",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_page_views",
+    "column": "tried_again_dt",
+    "new_table": "mart_page_views",
+    "new_column": "tried_again_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "book",
+    "new_table": "mart_responses",
+    "new_column": "book_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "branch",
+    "new_table": "mart_enrollments",
+    "new_column": "variation_index",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "chapter",
+    "new_table": "mart_responses",
+    "new_column": "chapter_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "completes_page",
+    "new_table": "mart_responses",
+    "new_column": "is_page_completion",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "course_name",
+    "new_table": "mart_classes",
+    "new_column": "course_repository",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "dt_submitted",
+    "new_table": "mart_responses",
+    "new_column": "submitted_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "included_in_research",
+    "new_table": "mart_responses",
+    "new_column": "is_included_in_research",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "is_page_completing",
+    "new_table": "mart_responses",
+    "new_column": "is_page_completion",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "item_id",
+    "new_table": "mart_responses",
+    "new_column": "source_question_reference",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "item_type",
+    "new_table": "mart_responses",
+    "new_column": "engine",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lms_id",
+    "new_table": null,
+    "new_column": null,
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_activity_reference",
+    "new_table": "mart_responses",
+    "new_column": "activity_reference",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_dt_saved",
+    "new_table": "mart_responses",
+    "new_column": "saved_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_dt_started",
+    "new_table": "mart_responses",
+    "new_column": "started_at",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_0",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_1",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_10",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_11",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_12",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_13",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_14",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_15",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_16",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_17",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_18",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_19",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_2",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_20",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_21",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_22",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_23",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_24",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_3",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_4",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_5",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_6",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_7",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_8",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_option_9",
+    "new_table": "mart_responses",
+    "new_column": "options",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_question_position",
+    "new_table": "mart_questions",
+    "new_column": null,
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_question_reference",
+    "new_table": "mart_responses",
+    "new_column": "source_question_reference",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_response_id",
+    "new_table": null,
+    "new_column": null,
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_response_json",
+    "new_table": "mart_responses",
+    "new_column": "response_json",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_session_id",
+    "new_table": "mart_responses",
+    "new_column": "interaction_id",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_status",
+    "new_table": null,
+    "new_column": null,
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "lrn_type",
+    "new_table": "mart_responses",
+    "new_column": "question_type",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "page",
+    "new_table": "mart_responses",
+    "new_column": "page_name",
+    "removed_on": "2026-12-01"
+  },
+  {
+    "table": "mart_responses",
+    "column": "release",
+    "new_table": "mart_responses",
+    "new_column": "release_name",
+    "removed_on": "2026-12-01"
+  }
+]
