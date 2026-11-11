@@ -25,9 +25,9 @@ source build. Linux binaries need a repository URL matching the distribution,
 architecture and R minor version; see the
 [R-universe binary installation instructions](https://docs.r-universe.dev/install/binaries.html).
 
-The release checks target the current R release on Ubuntu 26.04 x86_64,
-macOS arm64 and Windows x86_64. Binary availability must be verified against
-the first release. Other systems or R versions may require a source build.
+See the [R-universe package page](https://coursekata.r-universe.dev/ckdata) for
+available binaries and platform check results. Other systems or R versions may
+require a source build.
 
 ### Install the local source
 
@@ -67,7 +67,7 @@ including nullable 64-bit integers. Default pandas conversion can convert those
 integers to floating point and lose precision.
 
 For the current native binding and its tests, use the repository's
-[development environment](development.md#python).
+[development environment](development.md#r-and-python-adapters).
 
 ## AWS access
 
