@@ -2,9 +2,11 @@
 
 import os
 import stat
+import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, call
 
 import ckdata
 import pytest
@@ -37,6 +39,16 @@ class LoginJob:
             error.remote_may_be_running = False
             raise error
         return "same native operation"
+
+
+@pytest.fixture
+def cli_process(monkeypatch):
+    process = MagicMock(spec=subprocess.Popen)
+    process.returncode = 0
+    process.poll.return_value = 0
+    process.__enter__.return_value = process
+    monkeypatch.setattr(_auth.subprocess, "Popen", Mock(return_value=process))
+    return process
 
 
 def test_sign_in_resumes_the_same_operation_once(monkeypatch):
@@ -86,7 +98,7 @@ def test_disabled_login_and_permission_errors_never_start_browser(monkeypatch):
 
 
 def test_cli_uses_private_config_without_changing_parent_environment(
-    monkeypatch, tmp_path
+    monkeypatch, cli_process
 ):
     target = {
         "profile": "ckdata-direct",
@@ -96,27 +108,16 @@ def test_cli_uses_private_config_without_changing_parent_environment(
     invocations = []
     before = dict(os.environ)
 
-    class Process:
-        returncode = 0
-
-        def __init__(self, arguments, *, env):
-            path = Path(env["AWS_CONFIG_FILE"])
-            assert path.read_text() == target["config"]
-            if os.name != "nt":
-                assert stat.S_IMODE(path.stat().st_mode) == 0o600
-            invocations.append((arguments, path))
-
-        def poll(self):
-            return 0
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
+    def start(arguments, *, env):
+        path = Path(env["AWS_CONFIG_FILE"])
+        assert path.read_text() == target["config"]
+        if os.name != "nt":
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        invocations.append((arguments, path))
+        return cli_process
 
     monkeypatch.setattr(_auth, "_aws_cli", lambda: "invented-aws")
-    monkeypatch.setattr(_auth.subprocess, "Popen", Process)
+    _auth.subprocess.Popen.side_effect = start
     _auth._sso_login(target, LoginJob())
     arguments, config = invocations[0]
     assert arguments == [
@@ -132,6 +133,28 @@ def test_cli_uses_private_config_without_changing_parent_environment(
     ]
     assert not config.exists()
     assert dict(os.environ) == before
+
+
+def test_running_login_process_is_reaped_when_native_operation_finishes(
+    cli_process, tmp_path
+):
+    cli_process.poll.return_value = None
+    job = Mock(ready=Mock(return_value=True))
+    _auth._run_login("invented-aws", {"profile": "synthetic"}, job, str(tmp_path))
+    cli_process.assert_has_calls([call.kill(), call.wait()])
+
+
+def test_running_login_process_is_reaped_before_interrupt_propagates(
+    cli_process, tmp_path, monkeypatch
+):
+    cli_process.poll.return_value = None
+    job = Mock(ready=Mock(return_value=False))
+    interrupt = KeyboardInterrupt()
+    monkeypatch.setattr(_auth.time, "sleep", Mock(side_effect=interrupt))
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _auth._run_login("invented-aws", {"profile": "synthetic"}, job, str(tmp_path))
+    assert caught.value is interrupt
+    cli_process.assert_has_calls([call.kill(), call.wait()])
 
 
 @pytest.mark.parametrize("version", ["aws-cli/1.0", "not AWS CLI"])

@@ -1,6 +1,7 @@
 """Ibis inspection and projection around the shared Rust column policy."""
 
 import warnings
+from unittest.mock import Mock
 
 import ckdata
 import duckdb
@@ -75,13 +76,19 @@ def test_renamed_and_derived_outputs_warn_but_remain_like_r(responses):
 
 
 def test_pandas_execution_receives_the_published_projection(
-    responses, connection, query_result
+    responses, connection, query_result, monkeypatch
 ):
+    backend = ibis.get_backend(responses)
+    compile_query = backend.compile
+    compiler = Mock(wraps=compile_query)
+    monkeypatch.setattr(backend, "compile", compiler)
     query_result["reader"] = pa.table({"id": [1], "question_type": ["new"]})
     with ckdata.options(mode="publish"), pytest.warns(ckdata.ColumnWarning):
         assert tuple(responses.execute().columns) == ("id", "question_type")
     sql = connection._handle.query.call_args.args[0]
-    assert '"lrn_type"' not in sql
+    compiled = compiler.call_args
+    assert compiled.args[0].columns == ("id", "question_type")
+    assert sql == compile_query(*compiled.args, **compiled.kwargs)
 
 
 def test_explicit_allow_and_replacement_alias_do_not_warn(responses):
