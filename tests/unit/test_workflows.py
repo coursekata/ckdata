@@ -34,6 +34,86 @@ def run_script(script, *, env=None, cwd=ROOT):
     )
 
 
+def test_ci_rebuilds_when_a_change_affects_package_code(tmp_path, monkeypatch):
+    script = script_after("ci.yml", "name: Identify changes that require builds")
+    for variable in subprocess.check_output(
+        ["git", "rev-parse", "--local-env-vars"], text=True
+    ).splitlines():
+        monkeypatch.delenv(variable, raising=False)
+
+    def git(*args):
+        return subprocess.check_output(
+            [
+                "git",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            cwd=tmp_path,
+            text=True,
+        ).strip()
+
+    git("init", "--quiet", "--template=")
+    git("commit", "--allow-empty", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    for path in (
+        "README.md",
+        "docs/images/example.svg",
+        "core/tests/fixtures/README.MD",
+        ".github/dependency_policy.md",
+        "r/NEWS.md",
+    ):
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("Example documentation\n")
+        git("add", "--", path)
+    git("commit", "-qm", "docs")
+    docs = git("rev-parse", "HEAD")
+
+    # Renaming an ignored file to a source path still requires a build.
+    (tmp_path / "r/R").mkdir()
+    git("mv", "r/NEWS.md", "r/R/example.R")
+    git("commit", "-qm", "package source")
+    mixed = git("rev-parse", "HEAD")
+
+    output = tmp_path / "output"
+    for start, end, expected in (
+        (base, docs, "false"),
+        (docs, mixed, "true"),
+        ("", docs, "true"),
+    ):
+        output.write_text("")
+        result = run_script(
+            script,
+            cwd=tmp_path,
+            env={"BASE_SHA": start, "GITHUB_SHA": end, "GITHUB_OUTPUT": str(output)},
+        )
+        assert result.returncode == 0, result.stderr
+        assert output.read_text() == f"rebuild={expected}\n"
+
+
+def test_required_ci_rejects_unexpected_skips():
+    script = script_after("ci.yml", "name: Assert the expected jobs succeeded")
+    for rebuild, classification, quality, build, expected in (
+        ("true", "success", "success", "success", 0),
+        ("false", "success", "success", "skipped", 0),
+        ("true", "success", "success", "skipped", 1),
+        ("false", "success", "failure", "skipped", 1),
+        ("false", "failure", "success", "skipped", 1),
+    ):
+        needs = {
+            "changes": {"result": classification, "outputs": {"rebuild": rebuild}},
+            "quality": {"result": quality},
+            "r": {"result": build},
+        }
+        result = run_script(script, env={"NEEDS": json.dumps(needs)})
+        assert result.returncode == expected, result.stderr
+
+
 def test_publication_is_disabled_until_explicitly_ready():
     script = script_after("release.yml", "name: Require first-release readiness")
     for ready, expected in (("false", 1), ("true", 0)):
