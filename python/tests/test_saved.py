@@ -4,14 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Barrier
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import ckdata
 import ibis
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from ckdata import _saved
+from ckdata import _freshness, _saved
 
 
 def test_daily_reuse_refresh_and_snapshots_preserve_arrow_values(connection, tmp_path):
@@ -34,6 +34,22 @@ def test_daily_reuse_refresh_and_snapshots_preserve_arrow_values(connection, tmp
     assert table.column("big").to_pylist() == [9007199254740993, None]
 
 
+@pytest.mark.parametrize("container", [set, frozenset], ids=["set", "frozenset"])
+def test_unordered_allowlists_reuse_the_same_snapshot_as_ordered_names(
+    connection, query_result, tmp_path, container
+):
+    query = connection.table("types")
+    names = ["item_id", "lrn_type"]
+    with ckdata.options(allow={"mart_responses": names}):
+        original = ckdata.collect_saved(query, snapshot="baseline", dir=tmp_path)
+    query_result["reader"] = original.slice(0, 1)
+    with ckdata.options(allow={"mart_responses": container(names)}):
+        reused = ckdata.collect_saved(query, snapshot="baseline", dir=tmp_path)
+    assert reused.equals(original, check_metadata=True)
+    connection._handle.query.assert_called_once()
+    assert len(list(tmp_path.glob("snapshot-baseline-*.parquet"))) == 1
+
+
 def test_crossing_refresh_boundary_fetches_again(connection, tmp_path, monkeypatch):
     clock = [datetime(2026, 11, 10, 14, tzinfo=UTC).timestamp()]
     monkeypatch.setattr(_saved.time, "time", lambda: clock[0])
@@ -54,6 +70,29 @@ def test_completed_build_revision_reuses_then_refreshes(connection, tmp_path):
     assert connection._handle.query.call_count == 1
     current[0] = "build-b"
     ckdata.collect_saved(query, freshness=policy, dir=tmp_path)
+    assert connection._handle.query.call_count == 2
+
+
+def test_revision_cache_refreshes_changed_rows_at_expiry(
+    connection, query_result, tmp_path, monkeypatch
+):
+    clock = [0.0]
+    monkeypatch.setattr(_freshness.time, "monotonic", lambda: clock[0])
+    revision = Mock(side_effect=["build-a", "build-b"])
+    policy = ckdata.freshness_check(revision, every=10)
+    query = connection.table("types")
+    original = ckdata.collect_saved(query, freshness=policy, dir=tmp_path)
+    changed = original.slice(0, 1)
+    query_result["reader"] = changed
+
+    clock[0] = 9.999
+    assert ckdata.collect_saved(query, freshness=policy, dir=tmp_path).equals(original)
+    revision.assert_called_once()
+    connection._handle.query.assert_called_once()
+
+    clock[0] = 10
+    assert ckdata.collect_saved(query, freshness=policy, dir=tmp_path).equals(changed)
+    assert revision.call_count == 2
     assert connection._handle.query.call_count == 2
 
 
@@ -110,21 +149,30 @@ def test_unreadable_normal_result_is_refetched_and_snapshot_is_preserved(
     assert snapshot.read_bytes() == b"invented corrupt snapshot"
 
 
-def test_sql_source_access_and_column_settings_each_separate_saved_results(
-    connection, tmp_path
+@pytest.mark.parametrize("change", ["sql", "access", "mode", "allow"])
+def test_saved_identity_changes_miss_then_reuse_independently(
+    connection, tmp_path, change
 ):
     query = connection.table("types")
-    policy = ckdata.daily_at("00:00", "UTC")
+    policy = lambda con: "fixed-build"
     ckdata.collect_saved(query, freshness=policy, dir=tmp_path)
-    ckdata.collect_saved(query.select("id"), freshness=policy, dir=tmp_path)
-    connection._handle.info.return_value["arn"] = (
-        "arn:aws:sts::111111111111:assumed-role/other-synthetic-reader/test"
-    )
-    ckdata.collect_saved(query, freshness=policy, dir=tmp_path)
-    with ckdata.options(mode="audit", allow={"types": ["id"]}):
+    settings = {}
+    if change == "sql":
+        query = query.select("id")
+    elif change == "access":
+        connection._handle.info.return_value["arn"] = (
+            "arn:aws:sts::111111111111:assumed-role/other-synthetic-reader/test"
+        )
+    elif change == "mode":
+        settings = {"mode": "audit"}
+    else:
+        settings = {"allow": {"types": ["id"]}}
+    with ckdata.options(**settings):
         ckdata.collect_saved(query, freshness=policy, dir=tmp_path)
-    assert connection._handle.query.call_count == 4
-    assert len(list(tmp_path.glob("result-*.parquet"))) == 4
+        assert connection._handle.query.call_count == 2
+        ckdata.collect_saved(query, freshness=policy, dir=tmp_path)
+        assert connection._handle.query.call_count == 2
+    assert len(list(tmp_path.glob("result-*.parquet"))) == 2
 
 
 def test_other_ibis_backends_require_explicit_source_context(tmp_path):
