@@ -33,4 +33,12 @@ column_changes <- changes |>
   dplyr::filter(!is.na(column), !is.na(removed_on)) |>
   dplyr::select(dplyr::all_of(fields)) |>
   dplyr::arrange(table, column)
-save(column_changes, file = "R/sysdata.rda", compress = "xz", version = 3)
+# The shared core embeds one catalog for both language adapters.
+jsonlite::write_json(
+  column_changes,
+  "../core/src/column_policy/changes.json",
+  dataframe = "rows",
+  na = "null",
+  pretty = TRUE,
+  auto_unbox = TRUE
+)

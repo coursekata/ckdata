@@ -172,7 +172,13 @@ test_that("managed column policy runs once and leaves direct DBI tables unchange
     new_column = "s_empty",
     removed_on = "2099-01-01"
   )
-  testthat::local_mocked_bindings(column_changes = changes, .package = "ckdata")
+  original_policy <- apply_column_policy
+  testthat::local_mocked_bindings(
+    apply_column_policy = function(x, ...) {
+      original_policy(x, ..., changes = changes)
+    },
+    .package = "ckdata"
+  )
   validate_live_connection(lake_con(), context)
   managed <- lake_tbl("types")
   direct <- dplyr::tbl(

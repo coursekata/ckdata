@@ -81,4 +81,7 @@ native_probe_job <- function(pending) .Call(wrap__native_probe_job, pending)
 #' @noRd
 native_probe_login_targets <- function() .Call(wrap__native_probe_login_targets)
 
+#' @noRd
+native_column_policy <- function(mode, read, outputs, allow, changes) .Call(wrap__native_column_policy, mode, read, outputs, allow, changes)
+
 # nolint end
