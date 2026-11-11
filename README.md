@@ -1,5 +1,7 @@
 # ckdata
 
+[![R-universe version](https://coursekata.r-universe.dev/badges/ckdata)](https://coursekata.r-universe.dev/ckdata)
+
 Query Amazon Athena from R or Python. ckdata runs read-only SQL
 queries and brings Parquet results into your analysis through Apache Arrow.
 
