@@ -5,9 +5,8 @@
 The R installation commands below use tagged releases from CourseKata's
 R-universe. A new release becomes installable once its binary builds finish.
 
-Python query execution and wheel publication are still pending. The README's
-Python example describes the target interface and is not runnable with the
-current development build.
+The Python interface is implemented locally; wheel publication is pending.
+Install the development checkout below until wheels are published.
 
 ## R
 
@@ -53,12 +52,15 @@ Python 3.11 or later is required. After wheel publication, install into your
 project's Python environment:
 
 ```sh
-python -m pip install ckdata pyarrow pandas
+python -m pip install 'ckdata[ibis]'
 ```
 
-The README example uses PyArrow and pandas. Install Polars or DuckDB in the same
-environment when working with those libraries. A compatible wheel avoids a
-local Rust build. See Python's
+The Ibis extra includes lazy queries and pandas interoperability. Install
+`ckdata` alone for direct SQL and Arrow results, and add Polars or DuckDB when
+working with those libraries. A compatible wheel avoids a local Rust build.
+The initial wheel matrix covers CPython 3.11 and later on Linux x86_64
+(manylinux 2.28), macOS arm64/x86_64 and Windows x86_64. CI tests each wheel
+on Python 3.11 and 3.15. See Python's
 [package installation guide](https://docs.python.org/3/installing/index.html)
 for virtual environments and pip.
 
@@ -66,8 +68,15 @@ For pandas, `result.to_pandas(types_mapper=pd.ArrowDtype)` preserves Arrow types
 including nullable 64-bit integers. Default pandas conversion can convert those
 integers to floating point and lose precision.
 
-For the current native binding and its tests, use the repository's
-[development environment](development.md#r-and-python-adapters).
+To install the current checkout, use Rust 1.94.1 or later and a C/C++ build
+toolchain with CMake:
+
+```sh
+python -m pip install '.[ibis]'
+```
+
+The [development environment](development.md#r-and-python-adapters) uses uv and
+the repository lock instead.
 
 ## AWS access
 
@@ -77,11 +86,11 @@ it does not provision an example environment. The package's runtime settings
 remain generic and accept the previous R package's environment names.
 
 ckdata uses standard AWS profiles, SSO credentials and region configuration.
-In interactive R sessions, the first connection that needs SSO sign-in opens
+In interactive R or Python sessions, the first connection that needs SSO sign-in opens
 AWS's browser login through AWS CLI v2 and resumes the same operation. No
 terminal sign-in command is needed. Install
 [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-and make `aws` available to R for this flow. Valid existing credentials and
+and make `aws` available to the process for this flow. Valid existing credentials and
 hosted workload identities work without the CLI.
 
 Use `DBI::dbConnect(ckdata::ckdata(), login = FALSE)` to fail immediately when
@@ -89,7 +98,9 @@ sign-in is needed, or set `options(ckdata.login = FALSE)` for managed helpers.
 The connection argument overrides the option. Scripts and jobs default to this
 fail-fast behavior; explicit `login = TRUE` permits browser sign-in. Other
 authentication failures and permission denials propagate without opening login.
-The Python query interface remains pending; this browser interaction is in R.
+Python uses `ckdata.configure(login=False)` for managed helpers, or
+`ckdata.connect(..., login=False)` for an explicit connection. An explicit
+`login=True` permits browser sign-in in a script. No sign-in happens on import.
 
 Set the source profile and connection settings in your application environment, using
 values for your intended environment:
@@ -149,3 +160,22 @@ Users who previously relied on the old package's implicit CourseKata marts
 database must set `CKDATA_SCHEMA` or `CK_DATALAKE_SCHEMA` explicitly. Compatibility
 preserves named settings; it does not restore an organization-specific default.
 See `?ckdata::ckdata_settings` and `?ckdata::ckdata_options` for the reference.
+
+Python accepts the same connection and individual SSO names, using `None`
+to bypass an inherited optional setting:
+
+```python
+import ckdata
+
+ckdata.configure(workgroup="your-workgroup", schema="your-database")
+with ckdata.connect(profile="your-profile", workgroup="your-workgroup") as con:
+    result = ckdata.lake_query("SELECT 1 AS example", con=con)
+```
+
+Explicit connection arguments take precedence over `configure()` or temporary
+`with ckdata.options(...):` settings, then canonical `CKDATA_*` environment variables. Legacy `CK_DATALAKE_*`
+aliases are supported only by R. Profile arguments suppress lower-priority SSO settings;
+explicit SSO arguments can select direct SSO, with missing fields filled from
+the selected plain SSO profile. The shared Rust providers resolve profiles,
+role chains, credential renewal and standard AWS fallbacks. Call
+`lake_disconnect()` before changing managed connection settings.

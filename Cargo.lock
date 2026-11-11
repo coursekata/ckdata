@@ -951,6 +951,7 @@ dependencies = [
  "ckdata",
  "pyo3",
  "pyo3-arrow",
+ "tokio",
 ]
 
 [[package]]

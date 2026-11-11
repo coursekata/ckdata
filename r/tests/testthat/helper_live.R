@@ -211,6 +211,10 @@ local_live_context <- function(env = rlang::caller_env()) {
   )
   con <- DBI::dbConnect(
     ckdata::ckdata(),
+    profile = single_string(
+      Sys.getenv("CKDATA_TEST_PROFILE"),
+      "CKDATA_TEST_PROFILE"
+    ),
     workgroup = seat$workgroup,
     schema = deployment$database,
     region = deployment$region,

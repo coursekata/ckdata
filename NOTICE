@@ -1,0 +1,18 @@
+Third-party attribution notices for ckdata
+
+arrow-array 60.1.0, arrow-buffer 60.1.0, arrow-cast 60.1.0, arrow-cmp 60.1.0, arrow-data 60.1.0, arrow-ipc 60.1.0, arrow-ord 60.1.0, arrow-schema 60.1.0, arrow-select 60.1.0, parquet 60.1.0
+
+Apache Arrow
+Copyright 2016-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This product includes software from the chronoutil crate (MIT)
+ * Copyright (c) 2020-2022 Oliver Margetts
+ * https://github.com/olliemath/chronoutil
+
+This product includes software from the compact-thrift project (Apache 2.0)
+ * Copyright Jörn Horstmann
+ * https://github.com/jhorstmann/compact-thrift
+

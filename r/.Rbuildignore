@@ -6,3 +6,4 @@
 ^data-raw$
 (^|/)[^/]*saga[^/]*(/|$)
 ^\.lintr$
+^inst/licenses/rust$

@@ -1,7 +1,35 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
 [project]
-name = "ckdata-development"
-version = "0.0.0"
+name = "ckdata"
+dynamic = ["version"]
+description = "Read Amazon Athena results through Arrow, with lazy queries and saved Parquet results."
+readme = "README.md"
 requires-python = ">=3.11"
+dependencies = ["pyarrow>=26", "pydantic>=2.12,<3", "tzdata>=2026.1"]
+license = "MIT"
+license-files = ["LICENSE", "NOTICE", "python/THIRD_PARTY_LICENSES.txt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+]
+
+[project.urls]
+Repository = "https://github.com/coursekata/ckdata"
+Issues = "https://github.com/coursekata/ckdata/issues"
+
+[project.optional-dependencies]
+ibis = ["ibis-framework>=12,<13", "pandas>=2.2,<4", "pyarrow-hotfix>=0.4"]
+
+[tool.maturin]
+manifest-path = "python/Cargo.toml"
+module-name = "ckdata._native"
+python-source = "python"
+locked = true
+include = [{ path = "rust-notices/**/*", from = "out-dir", to = "ckdata/licenses/" }]
 
 [dependency-groups]
 dev = [
@@ -14,22 +42,45 @@ dev = [
     "rust-just>=1.46,<2",
 ]
 test = ["pytest>=9,<10"]
-bindings = [{ include-group = "test" }, "maturin>=1.15,<2", "pyarrow>=26,<27", "polars", "pandas", "duckdb"]
+bindings = [
+    { include-group = "test" },
+    "maturin>=1.15,<2",
+    "pyarrow>=26,<27",
+    "polars",
+    "pandas",
+    "duckdb",
+]
 
 [tool.uv]
-# This root configures development; python/ remains the distributable package.
-package = false
 exclude-newer = "7 days"
-# Native sources need rebuilding when the optional binding is selected.
-reinstall-package = ["ckdata"]
-
-[tool.uv.workspace]
-members = ["python"]
+# Invalidate native builds when their inputs change, rather than rebuilding on
+# every developer command. Pure Python modules remain editable.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "core/Cargo.toml" },
+    { file = "core/src/**/*.rs" },
+    { file = "core/src/**/*.json" },
+    { file = "python/Cargo.toml" },
+    { file = "python/src/**/*.rs" },
+    { file = "python/build.rs" },
+    { file = "python/ckdata/*.py" },
+    { file = "python/ckdata/*.json" },
+    { file = "README.md" },
+    { file = "LICENSE" },
+    { file = "NOTICE" },
+    { file = "python/THIRD_PARTY_LICENSES.txt" },
+    { env = "RUSTFLAGS" },
+    { env = "CARGO_BUILD_TARGET" },
+    { env = "MACOSX_DEPLOYMENT_TARGET" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
+markers = ["live: opt-in AWS acceptance against restricted synthetic fixtures"]
 
 [tool.ruff]
 force-exclude = true
