@@ -202,13 +202,11 @@ R releases use CourseKata's R-universe registry with `subdir: r` and
 3. Create and push a lightweight `vX.Y.Z` tag pointing to that commit. The release
    workflow requires `R_RELEASE_READY=true`, matching versions and successful
    main CI before creating the GitHub release.
-4. R-universe builds the binaries. The workflow waits for them, installs without
-   Rust and runs the installed R tests on current R for Ubuntu 26.04 x86_64,
-   macOS arm64 and Windows x86_64. Linux must match R-universe's distribution.
+4. R-universe builds and checks the R package. Review the release's
+   [platform check results](https://coursekata.r-universe.dev/ckdata#checktable).
 
-Never move a release tag; release a new version for a fix. The
-[`verify_release` workflow](../.github/workflows/verify_release.yml) can repeat
-binary verification for an existing version. When changing the release compiler,
+Never move a release tag. Release a new version for a fix. When changing the
+release compiler,
 run `python3 scripts/check_licenses.py --runtime-write --write` and review its
 provenance and licenses. `--archive /absolute/path/to/package` checks notices in
 a wheel, source archive or R tarball.

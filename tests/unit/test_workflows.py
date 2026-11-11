@@ -234,20 +234,3 @@ def test_tag_checks_every_manifest_and_main_ancestry():
             result = run_script(script, env=env, cwd=directory)
             assert result.returncode != 0, relative
             target.write_text(original)
-
-
-def test_os_release_does_not_replace_package_version():
-    script = script_after(
-        "verify_release.yml", "name: Check R-universe built for this Linux release"
-    )
-    extraction = "\n".join(script.splitlines()[:2])
-    with tempfile.TemporaryDirectory(prefix="ckdata-os-release-test-") as directory:
-        source = Path(directory) / "os-release"
-        source.write_text('VERSION="26.04.1 LTS"\nVERSION_CODENAME="synthetic"\n')
-        result = run_script(
-            "VERSION=0.0.1\n"
-            + extraction.replace("/etc/os-release", str(source))
-            + '\nprintf "%s %s" "$VERSION" "$VERSION_CODENAME"'
-        )
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "0.0.1 synthetic"

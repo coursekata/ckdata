@@ -1,9 +1,7 @@
 name: release
 
-# A v* tag on main releases the R package. The tag must name the version all four manifests carry,
-# and the GitHub release created here is what R-universe builds from, through "branch": "*release"
-# in the registry; verify then installs what R-universe built. Wheels and PyPI arrive with the
-# Python package.
+# Tags publish the GitHub release tracked by R-universe through branch "*release".
+# The tagged version must match all four manifests and have successful main CI.
 
 on:
   push:
@@ -81,11 +79,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
-
-  # A release created with the workflow's own token starts no other workflow, so the install check
-  # is called here rather than triggered by the release.
-  verify:
-    needs: github-release
-    uses: ./.github/workflows/verify_release.yml
-    with:
-      version: ${{ github.ref_name }}

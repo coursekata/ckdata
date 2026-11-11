@@ -1,6 +1,0 @@
-# actionlint v1.7.12 predates GitHub's ubuntu-26.04 runner, which verify_release needs because
-# R-universe builds its Linux binaries for Ubuntu 26.04. Drop the ignore once actionlint knows it.
-paths:
-  .github/workflows/verify_release.yml:
-    ignore:
-      - 'label "ubuntu-26.04" is unknown'
