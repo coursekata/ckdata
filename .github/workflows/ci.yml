@@ -8,7 +8,7 @@ name: ci
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, ci/markdown-only-smoke]
   push:
     branches: [main]
   workflow_dispatch:
@@ -21,10 +21,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rebuild: ${{ steps.paths.outputs.rebuild }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Identify changes that require builds
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          rebuild=true
+          # Manual runs and unavailable base commits fall back to the full suite.
+          if [[ -n "$BASE_SHA" ]] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null &&
+            git diff --quiet --no-renames "$BASE_SHA" "$GITHUB_SHA" -- . \
+              ':(top,exclude,glob,icase)**/*.md' \
+              ':(top,exclude,glob)docs/**' \
+              ':!**/*[sS][aA][gG][aA]*/**' ':!**/*[sS][aA][gG][aA]*'; then
+            rebuild=false
+          fi
+          echo "rebuild=$rebuild" >> "$GITHUB_OUTPUT"
+
   quality:
     uses: coursekata/ck-ci/.github/workflows/quality.yml@7b7d7a59556b4c15d4f15c9d6fd2723419a5dd19 # v0.2.1
 
   hooks:
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -134,6 +162,8 @@ jobs:
           retention-days: 30
 
   rust:
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
     name: rust (${{ matrix.task }})
     timeout-minutes: 30
     runs-on: ubuntu-latest
@@ -209,6 +239,8 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
   rust-minimum:
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
     timeout-minutes: 30
     runs-on: ubuntu-latest
     env:
@@ -273,6 +305,8 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
   dependency-inventory:
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -310,6 +344,8 @@ jobs:
           retention-days: 30
 
   r-source:
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -428,17 +464,25 @@ jobs:
             ${{ runner.temp }}/ckdata-cargo/target
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
-  # A job skipped because one it needs failed reports skipped, which a required check accepts, so
-  # this asserts success itself.
+  # The required check runs for every PR. Only the path filter can permit skipped builds.
   ci-passed:
     if: always()
-    needs: [quality, hooks, rust, rust-minimum, dependency-inventory, r-source, r]
+    needs: [changes, quality, hooks, rust, rust-minimum, dependency-inventory, r-source, r]
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
-      - name: Assert every job succeeded
+      - name: Assert the expected jobs succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+          echo "$NEEDS" | jq -e '
+            .changes.outputs.rebuild as $rebuild
+            | (.changes.result == "success")
+            and (.quality.result == "success")
+            and ($rebuild == "true" or $rebuild == "false")
+            and all(
+              to_entries[] | select(.key != "changes" and .key != "quality");
+              .value.result == (if $rebuild == "true" then "success" else "skipped" end)
+            )
+          ' > /dev/null
