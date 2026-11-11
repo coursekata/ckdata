@@ -40,7 +40,6 @@ def test_daily_refresh_uses_correct_boundary_including_skipped_and_repeated_time
 
 
 def test_revision_checks_are_reused_per_source_and_not_cached_on_failure(monkeypatch):
-    clock = [0]
     revisions = iter(["build-a", RuntimeError("unavailable"), "build-b"])
     calls = []
 
@@ -51,7 +50,7 @@ def test_revision_checks_are_reused_per_source_and_not_cached_on_failure(monkeyp
             raise value
         return value
 
-    monkeypatch.setattr(_freshness.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(_freshness.time, "monotonic", lambda: 0)
     policy = ckdata.freshness_check(check, every=10)
     assert policy.revision("connection", "source-a") == "build-a"
     assert policy.revision("connection", "source-a") == "build-a"
