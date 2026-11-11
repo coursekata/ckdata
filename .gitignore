@@ -11,4 +11,5 @@ __pycache__/
 node_modules
 .ruff_cache/
 lefthook-local.yml
+python/ckdata/licenses/
 r/inst/licenses/rust/
