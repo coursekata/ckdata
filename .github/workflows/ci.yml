@@ -48,7 +48,7 @@ jobs:
           echo "rebuild=$rebuild" >> "$GITHUB_OUTPUT"
 
   quality:
-    uses: coursekata/ck-ci/.github/workflows/quality.yml@7b7d7a59556b4c15d4f15c9d6fd2723419a5dd19 # v0.2.1
+    uses: coursekata/ck-ci/.github/workflows/quality.yml@dbb140fc013d4c9b6145c1f2570a44beb61ded9d # v0.2.2
 
   hooks:
     needs: changes
@@ -72,7 +72,7 @@ jobs:
         run: |
           uv run --locked --only-group dev pytest tests/unit
 
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
