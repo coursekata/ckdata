@@ -393,7 +393,7 @@ jobs:
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         env:
-          TRIVY_VERSION: v0.76.1
+          TRIVY_VERSION: v0.76.2
         with:
           version: ${{ env.TRIVY_VERSION }}
       - name: Inventory all severities, including unfixed advisories
